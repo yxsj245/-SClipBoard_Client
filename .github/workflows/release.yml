@@ -4,6 +4,24 @@ on:
   push:
     tags:
       - 'v*'  # 当推送以 v 开头的标签时触发
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      build_linux:
+        description: '构建 Linux 版本'
+        required: false
+        default: true
+        type: boolean
+      build_windows:
+        description: '构建 Windows 版本'
+        required: false
+        default: true
+        type: boolean
+      build_macos:
+        description: '构建 macOS 版本'
+        required: false
+        default: true
+        type: boolean
+
 
 env:
   CACHE_VERSION: v1  # 增加此版本号来强制刷新所有缓存
@@ -11,6 +29,7 @@ env:
 jobs:
   # Linux 构建
   build_linux:
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.build_linux) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -107,6 +126,7 @@ jobs:
 
   # Windows 构建
   build_windows:
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.build_windows) }}
     runs-on: windows-latest
     steps:
       - name: Checkout code
@@ -177,6 +197,7 @@ jobs:
 
   # macOS 构建
   build_macos:
+    if: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.build_macos) }}
     runs-on: macos-latest
     steps:
       - name: Checkout code
@@ -249,7 +270,7 @@ jobs:
 
   # 创建发布版本（仅在推送标签时触发）
   create_release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') }}
     needs: [build_linux, build_windows, build_macos]
     runs-on: ubuntu-latest
     steps:
@@ -309,23 +330,124 @@ jobs:
           prerelease: false
           body: |
             ## 共享剪切板客户端 - 发布版本
-            
+
             这是共享剪切板客户端的自动构建版本，支持以下平台：
-            
+
             - **Linux**: `shared-clipboard-client-linux.tar.gz`
             - **Windows**: `shared-clipboard-client-windows.zip`
             - **macOS**: `shared-clipboard-client-macos.tar.gz`
-            
+
             ### 使用方法
             1. 下载对应平台的压缩包
             2. 解压到任意目录
             3. 根据需要修改配置文件
             4. 运行可执行文件或使用提供的启动脚本
-            
+
             ### 配置文件
             - `config_example.json`: 配置示例文件
             - `network_config.json`: 网络配置文件
-            
+
             更多详细信息请参考 README.md 和使用说明.md 文件。
+
+            ---
+
+            **构建信息**:
+            - 工作流运行: #${{ github.run_number }}
+            - 提交哈希: ${{ github.sha }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 手动构建总结（仅在手动触发时显示）
+  manual_build_summary:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: [build_linux, build_windows, build_macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Manual Build Summary
+        run: |
+          echo "## 手动构建完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 构建状态" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.build_linux.result }}" == "success" ]]; then
+            echo "- ✅ Linux 构建: 成功" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.build_linux.result }}" == "skipped" ]]; then
+            echo "- ⏭️ Linux 构建: 跳过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Linux 构建: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.build_windows.result }}" == "success" ]]; then
+            echo "- ✅ Windows 构建: 成功" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.build_windows.result }}" == "skipped" ]]; then
+            echo "- ⏭️ Windows 构建: 跳过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Windows 构建: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.build_macos.result }}" == "success" ]]; then
+            echo "- ✅ macOS 构建: 成功" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.build_macos.result }}" == "skipped" ]]; then
+            echo "- ⏭️ macOS 构建: 跳过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ macOS 构建: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 构建产物" >> $GITHUB_STEP_SUMMARY
+          echo "构建产物已保存为 GitHub Actions Artifacts，可在工作流运行页面下载。" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 说明" >> $GITHUB_STEP_SUMMARY
+          echo "- 手动构建不会自动创建 GitHub Release" >> $GITHUB_STEP_SUMMARY
+          echo "- 如需创建正式发布，请推送版本标签（如 v1.0.0）" >> $GITHUB_STEP_SUMMARY
+          echo "- 构建产物将在 90 天后自动删除" >> $GITHUB_STEP_SUMMARY
+
+  # 构建总结
+  build_summary:
+    if: always()
+    needs: [build_linux, build_windows, build_macos, create_release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build Summary
+        run: |
+          echo "## 构建总结" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 构建状态" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.build_linux.result }}" == "success" ]]; then
+            echo "- ✅ Linux 构建: 成功" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.build_linux.result }}" == "skipped" ]]; then
+            echo "- ⏭️ Linux 构建: 跳过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Linux 构建: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.build_windows.result }}" == "success" ]]; then
+            echo "- ✅ Windows 构建: 成功" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.build_windows.result }}" == "skipped" ]]; then
+            echo "- ⏭️ Windows 构建: 跳过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ Windows 构建: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.build_macos.result }}" == "success" ]]; then
+            echo "- ✅ macOS 构建: 成功" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.build_macos.result }}" == "skipped" ]]; then
+            echo "- ⏭️ macOS 构建: 跳过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ macOS 构建: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [[ "${{ needs.create_release.result }}" == "success" ]]; then
+            echo "- ✅ 发布创建: 成功" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.create_release.result }}" == "skipped" ]]; then
+            echo "- ⏭️ 发布创建: 跳过" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- ❌ 发布创建: 失败" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 触发信息" >> $GITHUB_STEP_SUMMARY
+          echo "- 触发方式: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 工作流运行: #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "- 提交哈希: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
