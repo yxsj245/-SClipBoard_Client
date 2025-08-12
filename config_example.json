@@ -1,0 +1,24 @@
+{
+  "server_config": {
+    "server_ip": "192.168.1.100",
+    "api_port": "3001",
+    "ws_port": "3002"
+  },
+  "security_config": {
+    "auth_key": "X-API-Key",
+    "auth_value": "your-api-key-here"
+  },
+  "app_settings": {
+    "auto_start": false,
+    "minimize_to_tray": true,
+    "check_interval": 500,
+    "enable_notifications": true
+  },
+  "sync_settings": {
+    "enable_monitoring": true,
+    "enable_bidirectional_sync": false,
+    "max_content_length": 10000,
+    "sync_images": true,
+    "sync_files": false
+  }
+}
