@@ -31,38 +31,38 @@ def convert_png_to_ico(png_path, ico_path):
         # 调整图像大小并保存为ICO
         img.save(ico_path, format='ICO', sizes=sizes)
         
-        print(f"✅ 图标转换成功: {png_path} -> {ico_path}")
+        print(f"[OK] Icon conversion successful: {png_path} -> {ico_path}")
         return True
-        
+
     except Exception as e:
-        print(f"❌ 图标转换失败: {str(e)}")
+        print(f"[ERROR] Icon conversion failed: {str(e)}")
         return False
 
 def main():
     """主函数"""
-    print("🎨 图标转换工具")
+    print("Icon Conversion Tool")
     print("=" * 30)
-    
+
     # 检查PIL是否安装
     try:
         from PIL import Image
     except ImportError:
-        print("❌ 需要安装Pillow库")
-        print("请运行: pip install Pillow")
+        print("[ERROR] Pillow library is required")
+        print("Please run: pip install Pillow")
         return 1
-    
+
     # 源PNG文件
     png_file = "画板 1.png"
     ico_file = "icon.ico"
-    
+
     if not os.path.exists(png_file):
-        print(f"❌ 找不到PNG文件: {png_file}")
+        print(f"[ERROR] PNG file not found: {png_file}")
         return 1
-    
+
     # 转换图标
     if convert_png_to_ico(png_file, ico_file):
-        print(f"✅ ICO图标已创建: {ico_file}")
-        print("现在可以在PyInstaller中使用这个ICO文件了")
+        print(f"[OK] ICO icon created: {ico_file}")
+        print("You can now use this ICO file in PyInstaller")
         return 0
     else:
         return 1

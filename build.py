@@ -11,31 +11,37 @@ import subprocess
 import shutil
 from pathlib import Path
 
+# 设置输出编码以避免Unicode错误
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+
 def check_dependencies():
     """检查打包依赖"""
     print("检查打包依赖...")
     
     try:
         import PyInstaller
-        print(f"✅ PyInstaller 已安装: {PyInstaller.__version__}")
+        print(f"[OK] PyInstaller installed: {PyInstaller.__version__}")
     except ImportError:
-        print("❌ PyInstaller 未安装")
-        print("正在安装 PyInstaller...")
+        print("[ERROR] PyInstaller not installed")
+        print("Installing PyInstaller...")
         try:
             subprocess.check_call([sys.executable, "-m", "pip", "install", "pyinstaller"])
-            print("✅ PyInstaller 安装成功")
+            print("[OK] PyInstaller installed successfully")
         except subprocess.CalledProcessError:
-            print("❌ PyInstaller 安装失败")
+            print("[ERROR] PyInstaller installation failed")
             return False
-    
+
     # 检查其他依赖
     required_modules = ['PyQt5', 'requests', 'websockets', 'pyperclip', 'PIL']
     for module in required_modules:
         try:
             __import__(module)
-            print(f"✅ {module} 已安装")
+            print(f"[OK] {module} installed")
         except ImportError:
-            print(f"❌ {module} 未安装")
+            print(f"[ERROR] {module} not installed")
             return False
     
     return True
@@ -48,7 +54,7 @@ def clean_build():
     for dir_name in dirs_to_clean:
         if os.path.exists(dir_name):
             shutil.rmtree(dir_name)
-            print(f"✅ 已清理 {dir_name}")
+            print(f"[OK] Cleaned {dir_name}")
     
     # 清理spec文件生成的缓存
     for file in Path('.').glob('*.spec'):
@@ -64,11 +70,11 @@ def convert_icon():
     ico_file = "icon.ico"
 
     if not os.path.exists(png_file):
-        print(f"⚠️ 找不到PNG图标文件: {png_file}")
+        print(f"[WARNING] PNG icon file not found: {png_file}")
         return True  # 不是致命错误
 
     if os.path.exists(ico_file):
-        print(f"✅ ICO图标已存在: {ico_file}")
+        print(f"[OK] ICO icon already exists: {ico_file}")
         return True
 
     try:
@@ -78,10 +84,10 @@ def convert_icon():
             img = img.convert('RGBA')
         sizes = [(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)]
         img.save(ico_file, format='ICO', sizes=sizes)
-        print(f"✅ 图标转换成功: {ico_file}")
+        print(f"[OK] Icon converted successfully: {ico_file}")
         return True
     except Exception as e:
-        print(f"⚠️ 图标转换失败: {e}")
+        print(f"[WARNING] Icon conversion failed: {e}")
         return True  # 不是致命错误
 
 def build_executable():
@@ -134,13 +140,13 @@ def build_executable():
 
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print("✅ 构建成功!")
+        print("[OK] Build successful!")
         return True
     except subprocess.CalledProcessError as e:
-        print("❌ 构建失败!")
-        print(f"错误输出: {e.stderr}")
+        print("[ERROR] Build failed!")
+        print(f"Error output: {e.stderr}")
         if e.stdout:
-            print(f"标准输出: {e.stdout}")
+            print(f"Standard output: {e.stdout}")
         return False
 
 def create_distribution():
@@ -159,39 +165,39 @@ def create_distribution():
 
     if os.path.exists(exe_path):
         shutil.copy2(exe_path, dist_dir)
-        print(f"✅ 已复制主程序: {exe_name}")
+        print(f"[OK] Copied main program: {exe_name}")
     else:
-        print(f"❌ 找不到可执行文件: {exe_path}")
+        print(f"[ERROR] Executable file not found: {exe_path}")
         return False
 
-    print(f"✅ 发布包已创建在 {dist_dir} 目录（仅包含主程序）")
+    print(f"[OK] Release package created in {dist_dir} directory (main program only)")
     return True
 
 def main():
     """主函数"""
-    print("🚀 共享剪切板客户端打包工具")
+    print("Shared Clipboard Client Build Tool")
     print("=" * 50)
-    
+
     # 检查依赖
     if not check_dependencies():
-        print("❌ 依赖检查失败，请先安装所需依赖")
+        print("[ERROR] Dependency check failed, please install required dependencies")
         return 1
-    
+
     # 清理构建目录
     clean_build()
-    
+
     # 构建可执行文件
     if not build_executable():
-        print("❌ 构建失败")
+        print("[ERROR] Build failed")
         return 1
-    
+
     # 创建发布包
     if not create_distribution():
-        print("❌ 创建发布包失败")
+        print("[ERROR] Failed to create release package")
         return 1
-    
-    print("\n🎉 打包完成!")
-    print("可执行文件位于 release 目录中")
+
+    print("\n[SUCCESS] Build completed!")
+    print("Executable file is located in the release directory")
     
     return 0
 
