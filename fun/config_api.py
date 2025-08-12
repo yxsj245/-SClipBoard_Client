@@ -13,16 +13,19 @@ from datetime import datetime, timedelta
 
 class ConfigAPI:
     """配置管理API客户端"""
-    
-    def __init__(self, base_url: str = "http://localhost:3001"):
+
+    def __init__(self, base_url: str = "http://localhost:3001", timeout: int = 10):
         """
         初始化配置管理API客户端
-        
+
         Args:
             base_url: API服务器基础URL
+            timeout: 请求超时时间（秒），默认10秒
         """
         self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
         self.session = requests.Session()
+        self.session.timeout = timeout
         
     def get_client_config(self) -> Dict[str, Any]:
         """
@@ -34,7 +37,7 @@ class ConfigAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/config/client",
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -52,7 +55,7 @@ class ConfigAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/config",
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -88,7 +91,7 @@ class ConfigAPI:
             response = self.session.put(
                 f"{self.base_url}/api/config",
                 json=config,
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -164,7 +167,7 @@ class ConfigAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/config/stats",
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)

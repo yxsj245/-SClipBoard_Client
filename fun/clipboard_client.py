@@ -22,32 +22,36 @@ from websocket_api import WebSocketAPI, WebSocketMonitor
 class ClipboardSyncClient:
     """剪切板同步服务综合客户端"""
     
-    def __init__(self, 
+    def __init__(self,
                  base_url: str = "http://localhost:3001",
                  ws_url: str = "ws://localhost:3002/ws",
                  device_id: Optional[str] = None,
-                 security_headers: Optional[Dict[str, str]] = None):
+                 security_headers: Optional[Dict[str, str]] = None,
+                 http_timeout: int = 10,
+                 ws_timeout: int = 10):
         """
         初始化综合客户端
-        
+
         Args:
             base_url: HTTP API服务器基础URL
             ws_url: WebSocket服务器URL
             device_id: 设备ID
             security_headers: 安全请求头
+            http_timeout: HTTP请求超时时间（秒）
+            ws_timeout: WebSocket连接超时时间（秒）
         """
         self.base_url = base_url
         self.ws_url = ws_url
         self.device_id = device_id or f"client-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         self.security_headers = security_headers
-        
-        # 初始化各个API客户端
-        self.health = HealthAPI(base_url)
-        self.clipboard = ClipboardAPI(base_url)
-        self.devices = DevicesAPI(base_url)
-        self.config = ConfigAPI(base_url)
-        self.files = FilesAPI(base_url, security_headers)
-        self.websocket = WebSocketAPI(ws_url, device_id, security_headers)
+
+        # 初始化各个API客户端，使用统一的超时设置
+        self.health = HealthAPI(base_url, timeout=5)  # 健康检查用较短超时
+        self.clipboard = ClipboardAPI(base_url, timeout=http_timeout)
+        self.devices = DevicesAPI(base_url, security_headers, timeout=http_timeout)
+        self.config = ConfigAPI(base_url, timeout=http_timeout)
+        self.files = FilesAPI(base_url, security_headers, timeout=15)  # 文件操作用较长超时
+        self.websocket = WebSocketAPI(ws_url, device_id, security_headers, connect_timeout=ws_timeout)
     
     def check_service_status(self) -> Dict[str, Any]:
         """

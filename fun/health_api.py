@@ -12,16 +12,20 @@ import json
 
 class HealthAPI:
     """健康检查API客户端"""
-    
-    def __init__(self, base_url: str = "http://localhost:3001"):
+
+    def __init__(self, base_url: str = "http://localhost:3001", timeout: int = 5):
         """
         初始化健康检查API客户端
-        
+
         Args:
             base_url: API服务器基础URL
+            timeout: 请求超时时间（秒），默认5秒
         """
         self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
         self.session = requests.Session()
+        # 设置默认超时
+        self.session.timeout = timeout
         
     def check_health(self) -> Dict[str, Any]:
         """
@@ -42,7 +46,7 @@ class HealthAPI:
             
             response = self.session.get(
                 f"{self.base_url}/api/health",
-                timeout=10
+                timeout=self.timeout
             )
             
             response_time = time.time() - start_time

@@ -16,21 +16,24 @@ from datetime import datetime
 class WebSocketAPI:
     """WebSocket API客户端"""
     
-    def __init__(self, 
+    def __init__(self,
                  ws_url: str = "ws://localhost:3002/ws",
                  device_id: Optional[str] = None,
-                 security_headers: Optional[Dict[str, str]] = None):
+                 security_headers: Optional[Dict[str, str]] = None,
+                 connect_timeout: int = 10):
         """
         初始化WebSocket API客户端
-        
+
         Args:
             ws_url: WebSocket服务器URL
             device_id: 设备ID
             security_headers: 安全请求头
+            connect_timeout: 连接超时时间（秒），默认10秒
         """
         self.ws_url = ws_url
         self.device_id = device_id or f"python-client-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         self.security_headers = security_headers or {}
+        self.connect_timeout = connect_timeout
         self.websocket = None
         self.is_connected = False
         self.message_handlers = {}
@@ -52,18 +55,26 @@ class WebSocketAPI:
         try:
             # 构建连接参数
             extra_headers = self.security_headers if self.security_headers else None
-            
-            self.websocket = await websockets.connect(
-                self.ws_url,
-                extra_headers=extra_headers,
-                ping_interval=30,
-                ping_timeout=10
+
+            # 使用asyncio.wait_for添加连接超时
+            self.websocket = await asyncio.wait_for(
+                websockets.connect(
+                    self.ws_url,
+                    extra_headers=extra_headers,
+                    ping_interval=30,
+                    ping_timeout=10
+                ),
+                timeout=self.connect_timeout
             )
             
             self.is_connected = True
             self.logger.info(f"WebSocket连接成功: {self.ws_url}")
             return True
-            
+
+        except asyncio.TimeoutError:
+            self.logger.error(f"WebSocket连接超时: {self.ws_url} (超时时间: {self.connect_timeout}秒)")
+            self.is_connected = False
+            return False
         except Exception as e:
             self.logger.error(f"WebSocket连接失败: {str(e)}")
             self.is_connected = False

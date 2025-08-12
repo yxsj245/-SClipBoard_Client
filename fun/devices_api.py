@@ -13,16 +13,19 @@ import json
 class DevicesAPI:
     """设备管理API客户端"""
 
-    def __init__(self, base_url: str = "http://localhost:3001", security_headers: Dict[str, str] = None):
+    def __init__(self, base_url: str = "http://localhost:3001", security_headers: Dict[str, str] = None, timeout: int = 10):
         """
         初始化设备管理API客户端
 
         Args:
             base_url: API服务器基础URL
             security_headers: 安全认证头字典，例如 {"X-API-Key": "your-key"}
+            timeout: 请求超时时间（秒），默认10秒
         """
         self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
         self.session = requests.Session()
+        self.session.timeout = timeout
         self.security_headers = security_headers or {}
         
     def get_connection_stats(self) -> Dict[str, Any]:
@@ -52,7 +55,7 @@ class DevicesAPI:
             response = self.session.get(
                 f"{self.base_url}/api/devices/connections",
                 headers=headers,
-                timeout=30
+                timeout=self.timeout
             )
 
             return self._handle_response(response)

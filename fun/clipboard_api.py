@@ -15,16 +15,19 @@ from urllib.parse import urlencode
 
 class ClipboardAPI:
     """剪切板内容管理API客户端"""
-    
-    def __init__(self, base_url: str = "http://localhost:3001"):
+
+    def __init__(self, base_url: str = "http://localhost:3001", timeout: int = 10):
         """
         初始化剪切板API客户端
-        
+
         Args:
             base_url: API服务器基础URL
+            timeout: 请求超时时间（秒），默认10秒
         """
         self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
         self.session = requests.Session()
+        self.session.timeout = timeout
         
     def get_clipboard_items(self, 
                           page: int = 1, 
@@ -65,7 +68,7 @@ class ClipboardAPI:
             response = self.session.get(
                 f"{self.base_url}/api/clipboard",
                 params=params,
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -94,7 +97,7 @@ class ClipboardAPI:
             response = self.session.post(
                 f"{self.base_url}/api/clipboard",
                 json=data,
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -148,7 +151,7 @@ class ClipboardAPI:
             response = self.session.post(
                 f"{self.base_url}/api/clipboard",
                 json=data,
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -197,7 +200,7 @@ class ClipboardAPI:
             response = self.session.post(
                 f"{self.base_url}/api/clipboard",
                 json=data,
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -240,7 +243,7 @@ class ClipboardAPI:
                     f"{self.base_url}/api/clipboard/upload",
                     files=files,
                     data=data,
-                    timeout=60
+                    timeout=max(self.timeout * 3, 30)  # 文件上传使用更长的超时时间
                 )
             
             return self._handle_response(response)
@@ -261,7 +264,7 @@ class ClipboardAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/clipboard/{item_id}",
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -297,7 +300,7 @@ class ClipboardAPI:
             response = self.session.put(
                 f"{self.base_url}/api/clipboard/{item_id}",
                 json=data,
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -318,7 +321,7 @@ class ClipboardAPI:
         try:
             response = self.session.delete(
                 f"{self.base_url}/api/clipboard/{item_id}",
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)

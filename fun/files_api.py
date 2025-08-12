@@ -15,16 +15,19 @@ from urllib.parse import urlencode
 class FilesAPI:
     """文件管理API客户端"""
     
-    def __init__(self, base_url: str = "http://localhost:3001", security_headers: Optional[Dict[str, str]] = None):
+    def __init__(self, base_url: str = "http://localhost:3001", security_headers: Optional[Dict[str, str]] = None, timeout: int = 15):
         """
         初始化文件管理API客户端
-        
+
         Args:
             base_url: API服务器基础URL
             security_headers: 安全请求头，如 {'X-API-Key': 'your-key'}
+            timeout: 请求超时时间（秒），默认15秒（文件操作需要更长时间）
         """
         self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
         self.session = requests.Session()
+        self.session.timeout = timeout
         
         # 设置安全请求头
         if security_headers:
@@ -57,7 +60,7 @@ class FilesAPI:
             response = self.session.get(
                 f"{self.base_url}/api/files/preview",
                 params=params,
-                timeout=60
+                timeout=max(self.timeout * 2, 30)  # 文件预览需要更长时间
             )
             
             if response.status_code == 200:
@@ -107,7 +110,7 @@ class FilesAPI:
             response = self.session.get(
                 f"{self.base_url}/api/files/download",
                 params=params,
-                timeout=60
+                timeout=max(self.timeout * 3, 45)  # 文件下载需要更长时间
             )
             
             if response.status_code == 200:
@@ -151,7 +154,7 @@ class FilesAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/files/{item_id}",
-                timeout=60
+                timeout=max(self.timeout * 3, 45)  # 文件获取需要更长时间
             )
             
             if response.status_code == 200:
@@ -194,7 +197,7 @@ class FilesAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/files/{item_id}/preview",
-                timeout=60
+                timeout=max(self.timeout * 2, 30)  # 文件预览需要更长时间
             )
             
             if response.status_code == 200:
@@ -234,7 +237,7 @@ class FilesAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/files/stats",
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)
@@ -252,7 +255,7 @@ class FilesAPI:
         try:
             response = self.session.post(
                 f"{self.base_url}/api/files/cleanup",
-                timeout=120
+                timeout=max(self.timeout * 4, 60)  # 清理操作需要很长时间
             )
             
             return self._handle_response(response)
@@ -270,7 +273,7 @@ class FilesAPI:
         try:
             response = self.session.get(
                 f"{self.base_url}/api/files/cleanup/status",
-                timeout=30
+                timeout=self.timeout
             )
             
             return self._handle_response(response)

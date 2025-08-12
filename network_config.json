@@ -1,0 +1,12 @@
+{
+  "timeouts": {
+    "health_check": 5,
+    "api_request": 10,
+    "file_operation": 30,
+    "websocket_connect": 10,
+    "websocket_ping": 10,
+    "websocket_ping_interval": 30
+  },
+  "retry_count": 3,
+  "retry_delay": 1.0
+}

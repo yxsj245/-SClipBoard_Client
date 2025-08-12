@@ -28,6 +28,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'fun'))
 
 from clipboard_api import ClipboardAPI
 from websocket_api import WebSocketAPI
+from network_config import get_network_config, update_timeouts, get_timeout
 from clipboard_client import ClipboardSyncClient
 from devices_api import DevicesAPI
 
@@ -281,6 +282,261 @@ class ClipboardContentDialog(QDialog):
         QMessageBox.information(self, "提示", "已请求刷新，请稍候...")
 
 
+class NetworkTimeoutDialog(QDialog):
+    """网络超时设置对话框"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("网络超时设置")
+        self.setFixedSize(400, 350)
+        self.init_ui()
+        self.load_current_settings()
+
+    def init_ui(self):
+        """初始化界面"""
+        layout = QVBoxLayout()
+
+        # 说明文本
+        info_label = QLabel("调整网络连接超时时间，较短的超时可以更快发现连接问题，但可能导致网络较慢时连接失败。")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #666; margin-bottom: 10px;")
+        layout.addWidget(info_label)
+
+        # 超时设置组
+        timeout_group = QGroupBox("超时设置（秒）")
+        timeout_layout = QVBoxLayout()
+
+        # 健康检查超时
+        health_layout = QHBoxLayout()
+        health_layout.addWidget(QLabel("健康检查超时:"))
+        self.health_spin = QSpinBox()
+        self.health_spin.setRange(1, 30)
+        self.health_spin.setValue(5)
+        self.health_spin.setToolTip("检查服务器是否可用的超时时间，建议3-10秒")
+        health_layout.addWidget(self.health_spin)
+        health_layout.addWidget(QLabel("秒"))
+        health_layout.addStretch()
+        timeout_layout.addLayout(health_layout)
+
+        # API请求超时
+        api_layout = QHBoxLayout()
+        api_layout.addWidget(QLabel("API请求超时:"))
+        self.api_spin = QSpinBox()
+        self.api_spin.setRange(3, 60)
+        self.api_spin.setValue(10)
+        self.api_spin.setToolTip("普通API请求的超时时间，建议5-15秒")
+        api_layout.addWidget(self.api_spin)
+        api_layout.addWidget(QLabel("秒"))
+        api_layout.addStretch()
+        timeout_layout.addLayout(api_layout)
+
+        # WebSocket连接超时
+        ws_layout = QHBoxLayout()
+        ws_layout.addWidget(QLabel("WebSocket连接超时:"))
+        self.ws_spin = QSpinBox()
+        self.ws_spin.setRange(3, 60)
+        self.ws_spin.setValue(10)
+        self.ws_spin.setToolTip("WebSocket连接建立的超时时间，建议5-15秒")
+        ws_layout.addWidget(self.ws_spin)
+        ws_layout.addWidget(QLabel("秒"))
+        ws_layout.addStretch()
+        timeout_layout.addLayout(ws_layout)
+
+        # 文件操作超时
+        file_layout = QHBoxLayout()
+        file_layout.addWidget(QLabel("文件操作超时:"))
+        self.file_spin = QSpinBox()
+        self.file_spin.setRange(10, 300)
+        self.file_spin.setValue(30)
+        self.file_spin.setToolTip("文件上传下载的超时时间，建议30-120秒")
+        file_layout.addWidget(self.file_spin)
+        file_layout.addWidget(QLabel("秒"))
+        file_layout.addStretch()
+        timeout_layout.addLayout(file_layout)
+
+        timeout_group.setLayout(timeout_layout)
+        layout.addWidget(timeout_group)
+
+        # 预设按钮
+        preset_group = QGroupBox("快速设置")
+        preset_layout = QHBoxLayout()
+
+        fast_btn = QPushButton("快速模式")
+        fast_btn.setToolTip("适合网络良好的环境（超时时间较短）")
+        fast_btn.clicked.connect(self.set_fast_mode)
+        preset_layout.addWidget(fast_btn)
+
+        normal_btn = QPushButton("标准模式")
+        normal_btn.setToolTip("适合一般网络环境（默认设置）")
+        normal_btn.clicked.connect(self.set_normal_mode)
+        preset_layout.addWidget(normal_btn)
+
+        slow_btn = QPushButton("慢速模式")
+        slow_btn.setToolTip("适合网络较慢的环境（超时时间较长）")
+        slow_btn.clicked.connect(self.set_slow_mode)
+        preset_layout.addWidget(slow_btn)
+
+        preset_group.setLayout(preset_layout)
+        layout.addWidget(preset_group)
+
+        # 按钮
+        button_layout = QHBoxLayout()
+
+        reset_btn = QPushButton("重置默认")
+        reset_btn.clicked.connect(self.reset_defaults)
+        button_layout.addWidget(reset_btn)
+
+        button_layout.addStretch()
+
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        save_btn = QPushButton("保存")
+        save_btn.clicked.connect(self.save_settings)
+        save_btn.setDefault(True)
+        button_layout.addWidget(save_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def load_current_settings(self):
+        """加载当前设置"""
+        try:
+            config = get_network_config()
+            self.health_spin.setValue(config.timeouts.health_check)
+            self.api_spin.setValue(config.timeouts.api_request)
+            self.ws_spin.setValue(config.timeouts.websocket_connect)
+            self.file_spin.setValue(config.timeouts.file_operation)
+        except Exception as e:
+            print(f"加载超时设置失败: {e}")
+
+    def set_fast_mode(self):
+        """设置快速模式"""
+        self.health_spin.setValue(3)
+        self.api_spin.setValue(5)
+        self.ws_spin.setValue(5)
+        self.file_spin.setValue(15)
+
+    def set_normal_mode(self):
+        """设置标准模式"""
+        self.health_spin.setValue(5)
+        self.api_spin.setValue(10)
+        self.ws_spin.setValue(10)
+        self.file_spin.setValue(30)
+
+    def set_slow_mode(self):
+        """设置慢速模式"""
+        self.health_spin.setValue(10)
+        self.api_spin.setValue(20)
+        self.ws_spin.setValue(20)
+        self.file_spin.setValue(60)
+
+    def reset_defaults(self):
+        """重置为默认值"""
+        self.set_normal_mode()
+
+    def save_settings(self):
+        """保存设置"""
+        try:
+            success = update_timeouts(
+                health_check=self.health_spin.value(),
+                api_request=self.api_spin.value(),
+                websocket_connect=self.ws_spin.value(),
+                file_operation=self.file_spin.value()
+            )
+
+            if success:
+                QMessageBox.information(self, "成功", "超时设置已保存！\n重新连接后生效。")
+                self.accept()
+            else:
+                QMessageBox.warning(self, "错误", "保存设置失败！")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存设置时发生错误：{str(e)}")
+
+
+class HealthCheckThread(QThread):
+    """健康检查线程"""
+
+    health_check_completed = pyqtSignal(dict)  # 健康检查完成信号
+
+    def __init__(self, base_url: str, security_headers: Dict[str, str] = None):
+        super().__init__()
+        self.base_url = base_url
+        self.security_headers = security_headers or {}
+
+    def run(self):
+        """执行健康检查"""
+        try:
+            # 创建健康检查API客户端
+            from health_api import HealthAPI
+            health_api = HealthAPI(base_url=self.base_url, timeout=get_timeout('health_check'))
+            if self.security_headers:
+                health_api.session.headers.update(self.security_headers)
+
+            # 执行健康检查
+            result = health_api.check_health()
+            self.health_check_completed.emit(result)
+
+        except Exception as e:
+            # 发送错误结果
+            error_result = {
+                "success": False,
+                "message": f"健康检查异常: {str(e)}",
+                "status_code": None,
+                "response_time": None,
+                "data": None
+            }
+            self.health_check_completed.emit(error_result)
+
+
+class StatsUpdateThread(QThread):
+    """统计信息更新线程"""
+
+    stats_updated = pyqtSignal(dict)  # 统计信息更新信号
+
+    def __init__(self, base_url: str, security_headers: Dict[str, str] = None):
+        super().__init__()
+        self.base_url = base_url
+        self.security_headers = security_headers or {}
+
+    def run(self):
+        """执行统计信息更新"""
+        try:
+            from devices_api import DevicesAPI
+            from fun.clipboard_api import ClipboardAPI
+
+            # 创建API客户端
+            devices_api = DevicesAPI(self.base_url, self.security_headers, timeout=get_timeout('api_request'))
+            clipboard_api = ClipboardAPI(self.base_url, timeout=get_timeout('api_request'))
+
+            # 获取连接统计
+            stats_result = devices_api.get_connection_stats()
+
+            # 获取剪切板统计
+            clipboard_result = clipboard_api.get_clipboard_items(limit=1000)
+
+            # 合并结果
+            result = {
+                "success": stats_result.get('success', False),
+                "stats_data": stats_result.get('data', {}),
+                "clipboard_data": clipboard_result.get('data', []) if clipboard_result.get('success') else [],
+                "message": stats_result.get('message', '')
+            }
+
+            self.stats_updated.emit(result)
+
+        except Exception as e:
+            # 发送错误结果
+            error_result = {
+                "success": False,
+                "stats_data": {},
+                "clipboard_data": [],
+                "message": f"统计更新异常: {str(e)}"
+            }
+            self.stats_updated.emit(error_result)
+
+
 class WebSocketThread(QThread):
     """WebSocket连接线程"""
 
@@ -288,11 +544,12 @@ class WebSocketThread(QThread):
     connection_status_changed = pyqtSignal(bool)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, ws_url: str, device_id: str, security_headers: Dict[str, str] = None):
+    def __init__(self, ws_url: str, device_id: str, security_headers: Dict[str, str] = None, connect_timeout: int = 10):
         super().__init__()
         self.ws_url = ws_url
         self.device_id = device_id
         self.security_headers = security_headers or {}
+        self.connect_timeout = connect_timeout
         self.websocket = None
         self.is_running = False
         self.message_queue = []  # 消息队列
@@ -330,11 +587,14 @@ class WebSocketThread(QThread):
                 for key, value in self.security_headers.items():
                     ws_url += f"&authKey={key}&authValue={value}"
 
-            # 直接使用websockets库连接
-            self.websocket = await websockets.connect(
-                ws_url,
-                ping_interval=30,
-                ping_timeout=10
+            # 使用asyncio.wait_for添加连接超时
+            self.websocket = await asyncio.wait_for(
+                websockets.connect(
+                    ws_url,
+                    ping_interval=30,
+                    ping_timeout=10
+                ),
+                timeout=self.connect_timeout
             )
 
             self.connection_status_changed.emit(True)
@@ -350,6 +610,8 @@ class WebSocketThread(QThread):
             # 监听消息
             await self.listen_messages()
 
+        except asyncio.TimeoutError:
+            self.error_occurred.emit(f"WebSocket连接超时: 无法在{self.connect_timeout}秒内连接到服务器")
         except Exception as e:
             self.error_occurred.emit(f"WebSocket连接失败: {str(e)}")
 
@@ -417,7 +679,7 @@ class WebSocketThread(QThread):
 
 class ClipboardSyncApp(QMainWindow):
     """剪切板同步应用主窗口"""
-    
+
     def __init__(self):
         super().__init__()
         self.settings = QSettings('ClipboardSync', 'Settings')
@@ -425,6 +687,13 @@ class ClipboardSyncApp(QMainWindow):
         self.websocket_thread = None
         self.is_monitoring = False
         self.is_syncing = False
+
+        # 连接状态管理
+        self.connection_status = "未连接"  # 连接状态: "未连接", "正常", "已连接"
+        self.health_check_timer = QTimer()
+        self.health_check_timer.timeout.connect(self.perform_health_check)
+        self.health_check_thread = None  # 健康检查线程
+        self.stats_update_thread = None  # 统计更新线程
 
         # 初始化UI
         self.init_ui()
@@ -448,11 +717,118 @@ class ClipboardSyncApp(QMainWindow):
         self.current_device_data = []  # 存储当前设备数据
         self.current_clipboard_data = []  # 存储当前剪切板数据
         QTimer.singleShot(2000, self.start_stats_timer)  # 2秒后启动统计定时器
-        
+
+        # 启动时自动检查连接状态
+        QTimer.singleShot(1000, self.auto_check_connection)  # 1秒后自动检查连接
+
+    def auto_check_connection(self):
+        """程序启动时自动检查连接状态"""
+        try:
+            # 检查是否配置了服务器地址
+            server_ip = self.server_ip_edit.text().strip()
+            if not server_ip:
+                self.log_message("未配置服务器地址，跳过自动连接检查")
+                self.connection_status = "未连接"
+                self.update_connection_status_display()
+                return
+
+            self.log_message("正在进行启动时连接检查...")
+            self.perform_health_check_async()
+
+        except Exception as e:
+            self.log_message(f"自动连接检查失败: {str(e)}")
+            self.connection_status = "未连接"
+            self.update_connection_status_display()
+
+    def perform_health_check_async(self):
+        """异步执行健康检查"""
+        try:
+            # 如果已有健康检查线程在运行，先停止它
+            if self.health_check_thread and self.health_check_thread.isRunning():
+                self.health_check_thread.quit()
+                self.health_check_thread.wait()
+
+            # 获取API配置
+            base_url = self.get_api_base_url()
+            security_headers = self.get_security_headers()
+
+            # 创建并启动健康检查线程
+            self.health_check_thread = HealthCheckThread(base_url, security_headers)
+            self.health_check_thread.health_check_completed.connect(self.on_health_check_completed)
+            self.health_check_thread.start()
+
+        except Exception as e:
+            self.log_message(f"启动健康检查线程失败: {str(e)}")
+            self.connection_status = "未连接"
+            self.update_connection_status_display()
+
+    def on_health_check_completed(self, result: dict):
+        """健康检查完成回调"""
+        try:
+            if result.get('success'):
+                # 健康检查通过
+                if self.connection_status == "未连接":
+                    self.connection_status = "正常"
+                    self.log_message(f"健康检查通过，连接状态更新为: {self.connection_status}")
+                    self.show_notification("连接状态", "服务器连接正常")
+                else:
+                    self.log_message("健康检查通过，连接状态保持正常")
+
+                self.update_connection_status_display()
+
+                # 启动定期健康检查（每30秒检查一次）
+                if not self.health_check_timer.isActive():
+                    self.health_check_timer.start(30000)
+            else:
+                # 健康检查失败
+                self.connection_status = "未连接"
+                error_msg = result.get('message', '未知错误')
+                self.log_message(f"健康检查失败: {error_msg}")
+                self.update_connection_status_display()
+
+                # 启动重试定时器（10秒后重试）
+                QTimer.singleShot(10000, self.perform_health_check_async)
+
+        except Exception as e:
+            self.log_message(f"处理健康检查结果失败: {str(e)}")
+            self.connection_status = "未连接"
+            self.update_connection_status_display()
+
+    def perform_health_check(self):
+        """执行健康检查（定时器调用的版本，使用异步方式）"""
+        self.perform_health_check_async()
+
+    def update_connection_status_display(self):
+        """更新连接状态显示"""
+        try:
+            if self.connection_status == "未连接":
+                self.server_status_label.setText("服务器状态: 未连接")
+            elif self.connection_status == "正常":
+                self.server_status_label.setText("服务器状态: 正常")
+            elif self.connection_status == "已连接":
+                self.server_status_label.setText("服务器状态: 已连接")
+        except Exception as e:
+            self.log_message(f"更新连接状态显示失败: {str(e)}")
+
+    def update_connection_status_on_sync(self):
+        """使用同步功能后更新连接状态为已连接"""
+        if self.connection_status == "正常":
+            self.connection_status = "已连接"
+            self.log_message(f"使用同步功能，连接状态更新为: {self.connection_status}")
+            self.update_connection_status_display()
+
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("共享剪切板同步工具")
         self.setGeometry(100, 100, 800, 600)
+
+        # 设置窗口图标
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "画板 1.png")
+            if os.path.exists(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+        except Exception as e:
+            self.log_message(f"设置窗口图标失败: {str(e)}")
         
         # 创建中央窗口部件
         central_widget = QWidget()
@@ -476,25 +852,34 @@ class ClipboardSyncApp(QMainWindow):
         
         # 底部按钮
         button_layout = QHBoxLayout()
-        
+
         self.start_monitor_btn = QPushButton("开始单向同步")
         self.start_monitor_btn.clicked.connect(self.toggle_monitoring)
         button_layout.addWidget(self.start_monitor_btn)
-        
+
         self.start_sync_btn = QPushButton("开始双向同步")
         self.start_sync_btn.clicked.connect(self.toggle_syncing)
         button_layout.addWidget(self.start_sync_btn)
-        
+
         self.settings_btn = QPushButton("设置")
         self.settings_btn.clicked.connect(self.show_settings)
         button_layout.addWidget(self.settings_btn)
-        
+
+        self.timeout_btn = QPushButton("超时设置")
+        self.timeout_btn.clicked.connect(self.show_timeout_settings)
+        self.timeout_btn.setToolTip("配置网络连接超时时间")
+        button_layout.addWidget(self.timeout_btn)
+
         button_layout.addStretch()
-        
+
         self.hide_btn = QPushButton("隐藏到托盘")
         self.hide_btn.clicked.connect(self.hide_to_tray)
         button_layout.addWidget(self.hide_btn)
-        
+
+        self.quit_btn = QPushButton("退出程序")
+        self.quit_btn.clicked.connect(self.quit_application)
+        button_layout.addWidget(self.quit_btn)
+
         main_layout.addLayout(button_layout)
         
     def create_status_tab(self):
@@ -678,43 +1063,72 @@ class ClipboardSyncApp(QMainWindow):
         if not QSystemTrayIcon.isSystemTrayAvailable():
             QMessageBox.critical(self, "系统托盘", "系统不支持托盘功能")
             return
-            
+
         # 创建托盘图标
         self.tray_icon = QSystemTrayIcon(self)
-        
-        # 设置图标 (这里使用默认图标，实际应用中应该使用自定义图标)
-        self.tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
+
+        # 设置图标
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "画板 1.png")
+            if os.path.exists(icon_path):
+                self.tray_icon.setIcon(QIcon(icon_path))
+            else:
+                # 如果自定义图标不存在，使用默认图标
+                self.tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
+        except Exception as e:
+            # 如果设置自定义图标失败，使用默认图标
+            self.tray_icon.setIcon(self.style().standardIcon(self.style().SP_ComputerIcon))
+            self.log_message(f"设置托盘图标失败，使用默认图标: {str(e)}")
+
         self.tray_icon.setToolTip("共享剪切板同步工具")
-        
+
         # 创建托盘菜单
-        tray_menu = QMenu()
-        
+        self.tray_menu = QMenu()
+
         show_action = QAction("显示主窗口", self)
         show_action.triggered.connect(self.show_main_window)
-        tray_menu.addAction(show_action)
-        
-        tray_menu.addSeparator()
-        
-        start_monitor_action = QAction("开始单向同步", self)
-        start_monitor_action.triggered.connect(self.toggle_monitoring)
-        tray_menu.addAction(start_monitor_action)
-        
-        start_sync_action = QAction("开始双向同步", self)
-        start_sync_action.triggered.connect(self.toggle_syncing)
-        tray_menu.addAction(start_sync_action)
-        
-        tray_menu.addSeparator()
-        
+        self.tray_menu.addAction(show_action)
+
+        self.tray_menu.addSeparator()
+
+        # 保存菜单项的引用以便后续更新文本
+        self.tray_monitor_action = QAction("开始单向同步", self)
+        self.tray_monitor_action.triggered.connect(self.toggle_monitoring)
+        self.tray_menu.addAction(self.tray_monitor_action)
+
+        self.tray_sync_action = QAction("开始双向同步", self)
+        self.tray_sync_action.triggered.connect(self.toggle_syncing)
+        self.tray_menu.addAction(self.tray_sync_action)
+
+        self.tray_menu.addSeparator()
+
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(self.quit_application)
-        tray_menu.addAction(quit_action)
-        
-        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_menu.addAction(quit_action)
+
+        self.tray_icon.setContextMenu(self.tray_menu)
         self.tray_icon.show()
-        
+
         # 托盘图标双击事件
         self.tray_icon.activated.connect(self.tray_icon_activated)
-        
+
+    def update_tray_menu_text(self):
+        """更新托盘菜单项的文本"""
+        try:
+            if hasattr(self, 'tray_monitor_action'):
+                if self.is_monitoring:
+                    self.tray_monitor_action.setText("停止单向同步")
+                else:
+                    self.tray_monitor_action.setText("开始单向同步")
+
+            if hasattr(self, 'tray_sync_action'):
+                if self.is_syncing:
+                    self.tray_sync_action.setText("停止双向同步")
+                else:
+                    self.tray_sync_action.setText("开始双向同步")
+        except Exception as e:
+            self.log_message(f"更新托盘菜单文本失败: {str(e)}")
+
     def tray_icon_activated(self, reason):
         """托盘图标激活事件"""
         if reason == QSystemTrayIcon.DoubleClick:
@@ -753,12 +1167,24 @@ class ClipboardSyncApp(QMainWindow):
         """清理资源"""
         if self.clipboard_timer.isActive():
             self.clipboard_timer.stop()
+        if self.health_check_timer.isActive():
+            self.health_check_timer.stop()
         if self.is_monitoring:
             self.stop_monitoring()
         if self.is_syncing:
             self.stop_syncing()
         if self.websocket_thread:
             self.websocket_thread.stop()
+
+        # 清理健康检查线程
+        if self.health_check_thread and self.health_check_thread.isRunning():
+            self.health_check_thread.quit()
+            self.health_check_thread.wait(3000)  # 等待最多3秒
+
+        # 清理统计更新线程
+        if self.stats_update_thread and self.stats_update_thread.isRunning():
+            self.stats_update_thread.quit()
+            self.stats_update_thread.wait(3000)  # 等待最多3秒
         
     def log_message(self, message: str):
         """添加日志消息"""
@@ -778,7 +1204,12 @@ class ClipboardSyncApp(QMainWindow):
     def show_settings(self):
         """显示设置页面"""
         self.tab_widget.setCurrentIndex(1)  # 切换到设置页面
-        
+
+    def show_timeout_settings(self):
+        """显示超时设置对话框"""
+        dialog = NetworkTimeoutDialog(self)
+        dialog.exec_()
+
     def load_settings(self):
         """加载设置"""
         self.server_ip_edit.setText(self.settings.value('server_ip', ''))
@@ -871,13 +1302,13 @@ class ClipboardSyncApp(QMainWindow):
             base_url = self.get_api_base_url()
             security_headers = self.get_security_headers()
 
-            self.clipboard_client = ClipboardAPI(base_url=base_url)
+            self.clipboard_client = ClipboardAPI(base_url=base_url, timeout=get_timeout('api_request'))
             if security_headers:
                 self.clipboard_client.session.headers.update(security_headers)
 
             # 测试连接
             from health_api import HealthAPI
-            health_api = HealthAPI(base_url=base_url)
+            health_api = HealthAPI(base_url=base_url, timeout=get_timeout('health_check'))
             if security_headers:
                 health_api.session.headers.update(security_headers)
 
@@ -902,6 +1333,9 @@ class ClipboardSyncApp(QMainWindow):
             self.monitor_status_label.setText("监听状态: 运行中")
             self.server_status_label.setText("服务器状态: 已连接")
 
+            # 更新托盘菜单文本
+            self.update_tray_menu_text()
+
             self.log_message("剪切板监听已启动")
             self.show_notification("剪切板同步", "单向同步已启动")
 
@@ -916,6 +1350,9 @@ class ClipboardSyncApp(QMainWindow):
         self.start_monitor_btn.setText("开始单向同步")
         self.monitor_status_label.setText("监听状态: 未启动")
         self.server_status_label.setText("服务器状态: 未连接")
+
+        # 更新托盘菜单文本
+        self.update_tray_menu_text()
 
         self.log_message("剪切板监听已停止")
         self.show_notification("剪切板同步", "单向同步已停止")
@@ -945,7 +1382,7 @@ class ClipboardSyncApp(QMainWindow):
             base_url = self.get_api_base_url()
             security_headers = self.get_security_headers()
 
-            self.clipboard_client = ClipboardAPI(base_url)
+            self.clipboard_client = ClipboardAPI(base_url, timeout=get_timeout('api_request'))
             if security_headers:
                 self.clipboard_client.session.headers.update(security_headers)
 
@@ -969,7 +1406,7 @@ class ClipboardSyncApp(QMainWindow):
             security_headers = self.get_security_headers()
 
             # 创建WebSocket线程
-            self.websocket_thread = WebSocketThread(ws_url, device_id, security_headers)
+            self.websocket_thread = WebSocketThread(ws_url, device_id, security_headers, connect_timeout=get_timeout('websocket_connect'))
 
             # 连接信号
             self.websocket_thread.message_received.connect(self.handle_websocket_message)
@@ -983,6 +1420,9 @@ class ClipboardSyncApp(QMainWindow):
             self.start_sync_btn.setText("停止双向同步")
             self.sync_status_label.setText("同步状态: 连接中...")
 
+            # 更新托盘菜单文本
+            self.update_tray_menu_text()
+
             self.log_message("正在启动双向同步...")
             self.show_notification("剪切板同步", "双向同步已启动（包含本地监听）")
 
@@ -994,6 +1434,8 @@ class ClipboardSyncApp(QMainWindow):
             if self.clipboard_timer.isActive():
                 self.clipboard_timer.stop()
             self.is_syncing = False
+            # 更新托盘菜单文本
+            self.update_tray_menu_text()
 
     def stop_syncing(self):
         """停止双向同步"""
@@ -1010,6 +1452,9 @@ class ClipboardSyncApp(QMainWindow):
         self.start_sync_btn.setText("开始双向同步")
         self.sync_status_label.setText("同步状态: 未启动")
         self.websocket_status_label.setText("WebSocket状态: 未连接")
+
+        # 更新托盘菜单文本
+        self.update_tray_menu_text()
 
         self.log_message("双向同步已停止")
         self.show_notification("剪切板同步", "双向同步已停止")
@@ -1169,6 +1614,9 @@ class ClipboardSyncApp(QMainWindow):
             self.sync_status_label.setText("同步状态: 运行中")
             self.log_message("WebSocket连接成功，双向同步完全启动")
             self.show_notification("剪切板同步", "双向同步已完全连接")
+
+            # WebSocket连接成功时更新连接状态为"已连接"
+            self.update_connection_status_on_sync()
         else:
             self.websocket_status_label.setText("WebSocket状态: 未连接")
             if self.is_syncing:
@@ -1317,8 +1765,10 @@ class ClipboardSyncApp(QMainWindow):
                 self.last_sync_label.setText(f"最后同步时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 self.show_notification("剪切板同步", f"图片已同步: {file_name}")
 
-                # 更新统计信息
-                self.update_clipboard_stats_via_api()
+                # 使用同步功能后更新连接状态为"已连接"
+                self.update_connection_status_on_sync()
+
+                # 更新统计信息（通过统计定时器自动更新）
             else:
                 error_msg = result.get('message', '未知错误')
                 self.log_message(f"图片同步失败: {error_msg}")
@@ -1677,6 +2127,9 @@ class ClipboardSyncApp(QMainWindow):
                 self.log_message(f"剪切板内容已同步: {content[:50]}{'...' if len(content) > 50 else ''}")
                 self.last_sync_label.setText(f"最后同步时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
+                # 使用同步功能后更新连接状态为"已连接"
+                self.update_connection_status_on_sync()
+
                 # 更新统计信息
                 try:
                     items_result = self.clipboard_client.get_clipboard_items(limit=1)
@@ -1742,8 +2195,8 @@ class ClipboardSyncApp(QMainWindow):
             except Exception as e:
                 self.log_message(f"请求刷新剪切板内容失败: {str(e)}")
         else:
-            # 如果WebSocket未连接，尝试通过API获取
-            self.update_clipboard_stats_via_api()
+            # 如果WebSocket未连接，通过统计定时器获取
+            self.log_message("WebSocket未连接，将通过定时器更新统计信息")
 
     def format_device_name(self, device_id: str) -> str:
         """
@@ -1785,10 +2238,14 @@ class ClipboardSyncApp(QMainWindow):
             return device_id
 
     def update_connection_stats(self):
-        """更新设备连接统计信息"""
+        """更新设备连接统计信息（异步版本）"""
         try:
             # 检查UI元素是否已初始化
             if not hasattr(self, 'server_ip_edit') or not hasattr(self, 'total_connections_label'):
+                return
+
+            # 如果已有统计更新线程在运行，跳过本次更新
+            if self.stats_update_thread and self.stats_update_thread.isRunning():
                 return
 
             # 获取服务器配置
@@ -1799,19 +2256,25 @@ class ClipboardSyncApp(QMainWindow):
             # 获取安全认证配置
             security_headers = self.get_security_headers()
 
-            # 创建设备API客户端
-            devices_api = DevicesAPI(base_url, security_headers)
+            # 创建并启动统计更新线程
+            self.stats_update_thread = StatsUpdateThread(base_url, security_headers)
+            self.stats_update_thread.stats_updated.connect(self.on_stats_updated)
+            self.stats_update_thread.start()
 
-            # 获取连接统计
-            stats_result = devices_api.get_connection_stats()
+        except Exception as e:
+            self.log_message(f"启动统计更新线程失败: {str(e)}")
 
-            if stats_result.get('success'):
-                data = stats_result.get('data', {})
+    def on_stats_updated(self, result: dict):
+        """统计信息更新完成回调"""
+        try:
+            if result.get('success'):
+                stats_data = result.get('stats_data', {})
+                clipboard_data = result.get('clipboard_data', [])
 
                 # 更新统计标签
-                total_connections = data.get('totalConnections', 0)
-                active_connections = data.get('activeConnections', 0)
-                connected_devices = data.get('connectedDevices', [])
+                total_connections = stats_data.get('totalConnections', 0)
+                active_connections = stats_data.get('activeConnections', 0)
+                connected_devices = stats_data.get('connectedDevices', [])
 
                 self.total_connections_label.setText(f"总连接数: {total_connections}")
                 self.active_connections_label.setText(f"活跃连接数: {active_connections}")
@@ -1834,20 +2297,36 @@ class ClipboardSyncApp(QMainWindow):
                     self.device_list_btn.setEnabled(False)
                     self.device_list_btn.setText("查看设备列表")
 
+                # 更新剪切板统计
+                self.current_clipboard_data = clipboard_data
+
+                # 更新剪切板统计UI
+                if hasattr(self, 'items_count_label'):
+                    total = len(clipboard_data)
+                    self.items_count_label.setText(f"剪切板项目数: {total}")
+
+                    # 启用或禁用查看内容按钮
+                    if hasattr(self, 'clipboard_content_btn'):
+                        if total > 0:
+                            self.clipboard_content_btn.setEnabled(True)
+                            self.clipboard_content_btn.setText(f"查看云端内容 ({total})")
+                        else:
+                            self.clipboard_content_btn.setEnabled(False)
+                            self.clipboard_content_btn.setText("查看云端内容")
+
             else:
                 # 连接失败时显示详细错误信息
-                error_msg = stats_result.get('message', '未知错误')
-                status_code = stats_result.get('status_code', 'N/A')
+                error_msg = result.get('message', '未知错误')
 
-                self.total_connections_label.setText(f"总连接数: 获取失败 ({status_code})")
-                self.active_connections_label.setText(f"活跃连接数: 获取失败")
-                self.connected_devices_label.setText(f"在线设备数: 获取失败")
+                self.total_connections_label.setText("总连接数: 获取失败")
+                self.active_connections_label.setText("活跃连接数: 获取失败")
+                self.connected_devices_label.setText("在线设备数: 获取失败")
                 self.device_list_btn.setEnabled(False)
                 self.device_list_btn.setText("查看设备列表")
                 self.current_device_data = []
 
                 # 记录详细错误到日志
-                self.log_message(f"获取连接统计失败: {error_msg} (状态码: {status_code})")
+                self.log_message(f"获取连接统计失败: {error_msg}")
 
         except Exception as e:
             # 异常时显示错误信息
@@ -1860,78 +2339,15 @@ class ClipboardSyncApp(QMainWindow):
             self.current_device_data = []
 
             # 记录详细错误到日志
-            self.log_message(f"连接统计异常: {error_detail}")
+            self.log_message(f"处理统计信息异常: {error_detail}")
 
-        # 同时更新剪切板统计信息
-        self.update_clipboard_stats_via_api()
+        # 剪切板统计信息已在统计更新线程中一起获取，无需额外调用
 
     def update_clipboard_stats_via_api(self):
-        """通过API更新剪切板统计信息"""
-        try:
-            if not hasattr(self, 'server_ip_edit'):
-                return
-
-            # 获取服务器配置
-            server_ip = self.server_ip_edit.text() or "localhost"
-            api_port = self.api_port_edit.text() or "3001"
-            base_url = f"http://{server_ip}:{api_port}"
-
-            # 获取安全认证配置
-            security_headers = self.get_security_headers()
-
-            # 创建剪切板API客户端
-            from fun.clipboard_api import ClipboardAPI
-            clipboard_api = ClipboardAPI(base_url)
-            if security_headers:
-                clipboard_api.session.headers.update(security_headers)
-
-            # 获取剪切板内容
-            result = clipboard_api.get_clipboard_items(limit=1000)
-
-            if result.get('success'):
-                data = result.get('data', {})
-
-                if isinstance(data, dict):
-                    # 如果返回的是分页数据
-                    items = data.get('items', [])
-                    total = data.get('total', len(items))
-                    self.current_clipboard_data = items
-                elif isinstance(data, list):
-                    # 如果直接返回列表
-                    items = data
-                    total = len(items)
-                    self.current_clipboard_data = items
-                else:
-                    items = []
-                    total = 0
-                    self.current_clipboard_data = []
-
-                # 更新统计标签
-                self.items_count_label.setText(f"剪切板项目数: {total}")
-
-                # 启用或禁用查看内容按钮
-                if total > 0:
-                    self.clipboard_content_btn.setEnabled(True)
-                    self.clipboard_content_btn.setText(f"查看云端内容 ({total})")
-                else:
-                    self.clipboard_content_btn.setEnabled(False)
-                    self.clipboard_content_btn.setText("查看云端内容")
-
-            else:
-                # 获取失败时的处理
-                error_msg = result.get('message', '未知错误')
-                self.items_count_label.setText(f"剪切板项目数: 获取失败")
-                self.clipboard_content_btn.setEnabled(False)
-                self.clipboard_content_btn.setText("查看云端内容")
-                self.current_clipboard_data = []
-                self.log_message(f"获取剪切板统计失败: {error_msg}")
-
-        except Exception as e:
-            self.log_message(f"更新剪切板统计失败: {str(e)}")
-            self.items_count_label.setText(f"剪切板项目数: 获取失败")
-            self.clipboard_content_btn.setEnabled(False)
-            self.clipboard_content_btn.setText("查看云端内容")
-            self.current_clipboard_data = []
+        """更新剪切板统计信息（已废弃，现在通过统计更新线程获取）"""
+        # 这个方法已被统计更新线程替代，避免在主线程中进行网络请求
+        # 剪切板统计信息现在通过 on_stats_updated 方法更新
+        pass
 
 
 def main():
