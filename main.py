@@ -439,13 +439,8 @@ class ClipboardSyncApp(QMainWindow):
         self.last_clipboard_image_hash = None  # 存储最后的图片哈希值
         self.last_received_image_hash = None  # 存储最后接收到的图片哈希值
         self.is_setting_clipboard = False  # 标记是否正在设置剪切板（避免循环）
-        self.enable_image_sync = False  # 图片同步开关，暂时禁用以便调试
+        # 注意：enable_image_sync 将在 load_settings() 中设置，不在这里硬编码
         self.image_processing_time = 0  # 记录最后一次图片处理时间
-        self.image_processing_time = 0  # 记录最后一次图片处理时间
-        self.image_processing_time = 0  # 记录最后一次图片处理时间
-        self.last_clipboard_image = None  # 存储最后的图片数据，避免重复同步
-        self.last_clipboard_image = None  # 存储最后的图片数据，避免重复同步
-        self.last_clipboard_image = None  # 存储最后的图片数据，避免重复同步
 
         # 初始化设备统计定时器（延迟启动，确保UI完全初始化）
         self.stats_timer = QTimer()
@@ -798,10 +793,11 @@ class ClipboardSyncApp(QMainWindow):
         # 加载图片同步设置
         enable_image_sync = self.settings.value('enable_image_sync', False, type=bool)
         self.enable_image_sync_check.setChecked(enable_image_sync)
+        # 确保内部状态变量与UI状态一致
         self.enable_image_sync = enable_image_sync
 
         # 确保UI和内部状态一致
-        self.log_message(f"加载图片同步设置: {'启用' if enable_image_sync else '禁用'}")
+        self.log_message(f"加载图片同步设置: UI={'启用' if self.enable_image_sync_check.isChecked() else '禁用'}, 内部={'启用' if self.enable_image_sync else '禁用'}")
 
         self.check_interval_spin.setValue(self.settings.value('check_interval', 500, type=int))
         
@@ -815,10 +811,14 @@ class ClipboardSyncApp(QMainWindow):
         self.settings.setValue('auto_start', self.auto_start_check.isChecked())
         self.settings.setValue('minimize_to_tray', self.minimize_to_tray_check.isChecked())
         self.settings.setValue('enable_notifications', self.enable_notifications_check.isChecked())
-        self.settings.setValue('enable_image_sync', self.enable_image_sync_check.isChecked())
+        # 保存图片同步设置并确保内部状态同步
+        image_sync_enabled = self.enable_image_sync_check.isChecked()
+        self.settings.setValue('enable_image_sync', image_sync_enabled)
+        self.enable_image_sync = image_sync_enabled  # 确保内部状态与UI一致
+
         self.settings.setValue('check_interval', self.check_interval_spin.value())
 
-        self.log_message("设置已保存")
+        self.log_message(f"设置已保存 (图片同步: {'启用' if image_sync_enabled else '禁用'})")
         if show_message:
             QMessageBox.information(self, "设置", "设置已保存成功！")
         
@@ -1202,7 +1202,6 @@ class ClipboardSyncApp(QMainWindow):
                     import time
                     current_time = time.time()
                     if current_time - self.image_processing_time < 10:
-                        self.log_message(f"在图片处理时间窗口内，跳过检测 ({current_time - self.image_processing_time:.1f}秒)")
                         return
 
                     pixmap = clipboard.pixmap()
@@ -1599,9 +1598,10 @@ class ClipboardSyncApp(QMainWindow):
 
     def toggle_image_sync(self, enabled: bool):
         """切换图片同步功能"""
+        # 确保内部状态与UI状态一致
         self.enable_image_sync = enabled
         status = "启用" if enabled else "禁用"
-        self.log_message(f"图片同步已{status}")
+        self.log_message(f"图片同步已{status} (UI: {'启用' if self.enable_image_sync_check.isChecked() else '禁用'}, 内部: {'启用' if self.enable_image_sync else '禁用'})")
 
         if enabled:
             self.log_message("警告: 图片同步是实验性功能，可能导致程序不稳定")
