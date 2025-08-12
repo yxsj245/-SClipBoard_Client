@@ -151,11 +151,7 @@ jobs:
           restore-keys: |
             ${{ env.CACHE_VERSION }}-${{ runner.os }}-compression-
 
-      - name: Download Linux artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: shared-clipboard-client-linux-build
-          path: linux-build/
+
 
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
@@ -169,10 +165,7 @@ jobs:
           name: shared-clipboard-client-macos-build
           path: macos-build/
 
-      - name: Create Linux tar.gz
-        run: |
-          cd linux-build
-          tar -czf ../shared-clipboard-client-linux.tar.gz *
+
 
       - name: Create Windows zip
         run: |
@@ -188,7 +181,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            shared-clipboard-client-linux.tar.gz
             shared-clipboard-client-windows.zip
             shared-clipboard-client-macos.tar.gz
           generate_release_notes: true
@@ -199,7 +191,6 @@ jobs:
 
             这是共享剪切板客户端的自动构建版本，支持以下平台：
 
-            - **Linux**: `shared-clipboard-client-linux.tar.gz`
             - **Windows**: `shared-clipboard-client-windows.zip`
             - **macOS**: `shared-clipboard-client-macos.tar.gz`
 
