@@ -2,6 +2,9 @@
 
 基于PyQt5的Windows剪切板同步客户端，支持单向和双向剪切板内容同步。
 
+# 请先部署服务端
+[点击这里](https://github.com/SClipBoard/ClipBoard)
+
 ## 功能特性
 
 - ✅ **单向同步**: 监听本地剪切板变化，自动同步到服务器
