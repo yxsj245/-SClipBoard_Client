@@ -1,0 +1,331 @@
+name: Build and Release CLI
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送以 v 开头的标签时触发
+
+env:
+  CACHE_VERSION: v1  # 增加此版本号来强制刷新所有缓存
+
+jobs:
+  # Linux 构建
+  build_linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Cache system packages
+        uses: actions/cache@v3
+        with:
+          path: /var/cache/apt
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-apt-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-apt-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-pyqt5 \
+            python3-pyqt5.qtwidgets \
+            xvfb \
+            libxkbcommon-x11-0 \
+            libxcb-icccm4 \
+            libxcb-image0 \
+            libxcb-keysyms1 \
+            libxcb-randr0 \
+            libxcb-render-util0 \
+            libxcb-xinerama0 \
+            libxcb-xfixes0
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-python3.13-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-python3.13-
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Cache PyInstaller build
+        uses: actions/cache@v3
+        with:
+          path: |
+            build/
+            __pycache__/
+            dist/
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-pyinstaller-${{ hashFiles('**/*.py', '**/requirements.txt', 'main.py') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pyinstaller-
+
+      - name: Build Linux executable
+        run: |
+          pyinstaller --onefile \
+            --name shared-clipboard-client \
+            --add-data "config_example.json:." \
+            --add-data "network_config.json:." \
+            --hidden-import PyQt5.QtCore \
+            --hidden-import PyQt5.QtGui \
+            --hidden-import PyQt5.QtWidgets \
+            --hidden-import websockets \
+            --hidden-import requests \
+            --hidden-import pyperclip \
+            --hidden-import PIL \
+            main.py
+
+      - name: Create Linux distribution
+        run: |
+          mkdir -p linux-dist
+          cp dist/shared-clipboard-client linux-dist/
+          cp config_example.json linux-dist/
+          cp network_config.json linux-dist/
+          cp README.md linux-dist/
+          cp 使用说明.md linux-dist/
+          echo "#!/bin/bash" > linux-dist/run.sh
+          echo "./shared-clipboard-client" >> linux-dist/run.sh
+          chmod +x linux-dist/run.sh
+          chmod +x linux-dist/shared-clipboard-client
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-clipboard-client-linux-build
+          path: linux-dist/
+
+  # Windows 构建
+  build_windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-python3.13-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-python3.13-
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Cache PyInstaller build
+        uses: actions/cache@v3
+        with:
+          path: |
+            build\
+            __pycache__\
+            dist\
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-pyinstaller-${{ hashFiles('**/*.py', '**/requirements.txt', 'main.py') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pyinstaller-
+
+      - name: Build Windows executable
+        run: |
+          pyinstaller --onefile `
+            --name shared-clipboard-client `
+            --add-data "config_example.json;." `
+            --add-data "network_config.json;." `
+            --hidden-import PyQt5.QtCore `
+            --hidden-import PyQt5.QtGui `
+            --hidden-import PyQt5.QtWidgets `
+            --hidden-import websockets `
+            --hidden-import requests `
+            --hidden-import pyperclip `
+            --hidden-import PIL `
+            --noconsole `
+            main.py
+
+      - name: Create Windows distribution
+        run: |
+          mkdir windows-dist
+          copy dist\shared-clipboard-client.exe windows-dist\
+          copy config_example.json windows-dist\
+          copy network_config.json windows-dist\
+          copy README.md windows-dist\
+          copy 使用说明.md windows-dist\
+          copy 启动.bat windows-dist\
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-clipboard-client-windows-build
+          path: windows-dist/
+
+  # macOS 构建
+  build_macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/Library/Caches/pip
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-python3.13-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-python3.13-
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pip-
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Cache PyInstaller build
+        uses: actions/cache@v3
+        with:
+          path: |
+            build/
+            __pycache__/
+            dist/
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-pyinstaller-${{ hashFiles('**/*.py', '**/requirements.txt', 'main.py') }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-pyinstaller-
+
+      - name: Build macOS executable
+        run: |
+          pyinstaller --onefile \
+            --name shared-clipboard-client \
+            --add-data "config_example.json:." \
+            --add-data "network_config.json:." \
+            --hidden-import PyQt5.QtCore \
+            --hidden-import PyQt5.QtGui \
+            --hidden-import PyQt5.QtWidgets \
+            --hidden-import websockets \
+            --hidden-import requests \
+            --hidden-import pyperclip \
+            --hidden-import PIL \
+            main.py
+
+      - name: Create macOS distribution
+        run: |
+          mkdir -p macos-dist
+          cp dist/shared-clipboard-client macos-dist/
+          cp config_example.json macos-dist/
+          cp network_config.json macos-dist/
+          cp README.md macos-dist/
+          cp 使用说明.md macos-dist/
+          echo "#!/bin/bash" > macos-dist/run.sh
+          echo "./shared-clipboard-client" >> macos-dist/run.sh
+          chmod +x macos-dist/run.sh
+          chmod +x macos-dist/shared-clipboard-client
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-clipboard-client-macos-build
+          path: macos-dist/
+
+  # 创建发布版本（仅在推送标签时触发）
+  create_release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build_linux, build_windows, build_macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code (for release notes)
+        uses: actions/checkout@v4
+
+      - name: Cache compression tools
+        uses: actions/cache@v3
+        with:
+          path: /usr/bin
+          key: ${{ env.CACHE_VERSION }}-${{ runner.os }}-compression-tools
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-${{ runner.os }}-compression-
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-clipboard-client-linux-build
+          path: linux-build/
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-clipboard-client-windows-build
+          path: windows-build/
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: shared-clipboard-client-macos-build
+          path: macos-build/
+
+      - name: Create Linux tar.gz
+        run: |
+          cd linux-build
+          tar -czf ../shared-clipboard-client-linux.tar.gz *
+
+      - name: Create Windows zip
+        run: |
+          cd windows-build
+          zip -r ../shared-clipboard-client-windows.zip *
+
+      - name: Create macOS tar.gz
+        run: |
+          cd macos-build
+          tar -czf ../shared-clipboard-client-macos.tar.gz *
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            shared-clipboard-client-linux.tar.gz
+            shared-clipboard-client-windows.zip
+            shared-clipboard-client-macos.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          body: |
+            ## 共享剪切板客户端 - 发布版本
+            
+            这是共享剪切板客户端的自动构建版本，支持以下平台：
+            
+            - **Linux**: `shared-clipboard-client-linux.tar.gz`
+            - **Windows**: `shared-clipboard-client-windows.zip`
+            - **macOS**: `shared-clipboard-client-macos.tar.gz`
+            
+            ### 使用方法
+            1. 下载对应平台的压缩包
+            2. 解压到任意目录
+            3. 根据需要修改配置文件
+            4. 运行可执行文件或使用提供的启动脚本
+            
+            ### 配置文件
+            - `config_example.json`: 配置示例文件
+            - `network_config.json`: 网络配置文件
+            
+            更多详细信息请参考 README.md 和使用说明.md 文件。
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
