@@ -10,6 +10,8 @@ import os
 import json
 import asyncio
 import pyperclip
+import base64
+import io
 from typing import Dict, Any, Optional
 from datetime import datetime
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -18,7 +20,8 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QTabWidget, QGroupBox, QCheckBox, QSpinBox,
                              QDialog, QListWidget, QListWidgetItem)
 from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal, QSettings
-from PyQt5.QtGui import QIcon, QPixmap, QFont
+from PyQt5.QtGui import QIcon, QPixmap, QFont, QClipboard
+from PIL import Image
 
 # 添加fun目录到路径
 sys.path.append(os.path.join(os.path.dirname(__file__), 'fun'))
@@ -209,6 +212,64 @@ class ClipboardContentDialog(QDialog):
                 QMessageBox.information(self, "成功", f"已复制文本内容到剪切板\n内容: {content[:50]}{'...' if len(content) > 50 else ''}")
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"复制失败: {str(e)}")
+        elif content_type == 'image' and content:
+            try:
+                # 获取图片ID
+                item_id = content_data.get('id')
+                if not item_id:
+                    QMessageBox.warning(self, "错误", "图片缺少ID信息")
+                    return
+
+                # 通过文件API下载图片
+                parent_window = self.parent()
+                if not parent_window:
+                    QMessageBox.warning(self, "错误", "无法获取父窗口")
+                    return
+
+                try:
+                    from files_api import FilesAPI
+                    base_url = parent_window.get_api_base_url()
+                    security_headers = parent_window.get_security_headers()
+
+                    files_api = FilesAPI(base_url=base_url)
+                    if security_headers:
+                        files_api.session.headers.update(security_headers)
+
+                    # 下载图片文件
+                    result = files_api.download_file(item_id)
+
+                    if not result.get('success'):
+                        QMessageBox.warning(self, "错误", f"下载图片失败: {result.get('message', '未知错误')}")
+                        return
+
+                    image_bytes = result.get('content')
+                    if not image_bytes:
+                        QMessageBox.warning(self, "错误", "下载的图片数据为空")
+                        return
+
+                    # 转换为PIL Image
+                    pil_image = Image.open(io.BytesIO(image_bytes))
+
+                    # 转换为QPixmap
+                    pixmap = parent_window.pil_image_to_pixmap(pil_image)
+
+                    if not pixmap.isNull():
+                        # 设置到剪切板
+                        clipboard = QApplication.clipboard()
+                        clipboard.setPixmap(pixmap)
+
+                        file_name = content_data.get('fileName', '图片')
+                        QMessageBox.information(self, "成功", f"已复制图片到剪切板\n文件: {file_name}")
+                    else:
+                        QMessageBox.warning(self, "错误", "图片转换失败")
+
+                except Exception as inner_e:
+                    QMessageBox.warning(self, "错误", f"处理图片时发生错误: {str(inner_e)}")
+
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"复制图片失败: {str(e)}")
+                import traceback
+                print(f"图片复制错误详情: {traceback.format_exc()}")
         else:
             QMessageBox.information(self, "提示", f"暂不支持复制 {content_type} 类型的内容")
 
@@ -374,6 +435,17 @@ class ClipboardSyncApp(QMainWindow):
         self.clipboard_timer = QTimer()
         self.clipboard_timer.timeout.connect(self.check_clipboard)
         self.last_clipboard_content = ""
+        self.last_clipboard_image = None  # 存储最后的图片数据，避免重复同步
+        self.last_clipboard_image_hash = None  # 存储最后的图片哈希值
+        self.last_received_image_hash = None  # 存储最后接收到的图片哈希值
+        self.is_setting_clipboard = False  # 标记是否正在设置剪切板（避免循环）
+        self.enable_image_sync = False  # 图片同步开关，暂时禁用以便调试
+        self.image_processing_time = 0  # 记录最后一次图片处理时间
+        self.image_processing_time = 0  # 记录最后一次图片处理时间
+        self.image_processing_time = 0  # 记录最后一次图片处理时间
+        self.last_clipboard_image = None  # 存储最后的图片数据，避免重复同步
+        self.last_clipboard_image = None  # 存储最后的图片数据，避免重复同步
+        self.last_clipboard_image = None  # 存储最后的图片数据，避免重复同步
 
         # 初始化设备统计定时器（延迟启动，确保UI完全初始化）
         self.stats_timer = QTimer()
@@ -549,6 +621,12 @@ class ClipboardSyncApp(QMainWindow):
         self.minimize_to_tray_check = QCheckBox("启动时最小化到托盘")
         self.enable_notifications_check = QCheckBox("启用通知")
         self.enable_notifications_check.setChecked(True)
+
+        # 图片同步开关
+        self.enable_image_sync_check = QCheckBox("启用图片同步 (实验性功能)")
+        self.enable_image_sync_check.setChecked(False)  # 默认禁用
+        self.enable_image_sync_check.toggled.connect(self.toggle_image_sync)
+
         self.check_interval_spin = QSpinBox()
         self.check_interval_spin.setRange(100, 5000)
         self.check_interval_spin.setValue(500)
@@ -557,6 +635,7 @@ class ClipboardSyncApp(QMainWindow):
         other_layout.addWidget(self.auto_start_check)
         other_layout.addWidget(self.minimize_to_tray_check)
         other_layout.addWidget(self.enable_notifications_check)
+        other_layout.addWidget(self.enable_image_sync_check)
         
         interval_layout = QHBoxLayout()
         interval_layout.addWidget(QLabel("剪切板检查间隔:"))
@@ -568,7 +647,7 @@ class ClipboardSyncApp(QMainWindow):
         
         # 保存按钮
         save_btn = QPushButton("保存设置")
-        save_btn.clicked.connect(self.save_settings)
+        save_btn.clicked.connect(lambda: self.save_settings(show_message=True))
         layout.addWidget(save_btn)
         
         layout.addStretch()
@@ -715,9 +794,18 @@ class ClipboardSyncApp(QMainWindow):
         self.auto_start_check.setChecked(self.settings.value('auto_start', False, type=bool))
         self.minimize_to_tray_check.setChecked(self.settings.value('minimize_to_tray', False, type=bool))
         self.enable_notifications_check.setChecked(self.settings.value('enable_notifications', True, type=bool))
+
+        # 加载图片同步设置
+        enable_image_sync = self.settings.value('enable_image_sync', False, type=bool)
+        self.enable_image_sync_check.setChecked(enable_image_sync)
+        self.enable_image_sync = enable_image_sync
+
+        # 确保UI和内部状态一致
+        self.log_message(f"加载图片同步设置: {'启用' if enable_image_sync else '禁用'}")
+
         self.check_interval_spin.setValue(self.settings.value('check_interval', 500, type=int))
         
-    def save_settings(self):
+    def save_settings(self, show_message=True):
         """保存设置"""
         self.settings.setValue('server_ip', self.server_ip_edit.text())
         self.settings.setValue('api_port', self.api_port_edit.text())
@@ -727,10 +815,12 @@ class ClipboardSyncApp(QMainWindow):
         self.settings.setValue('auto_start', self.auto_start_check.isChecked())
         self.settings.setValue('minimize_to_tray', self.minimize_to_tray_check.isChecked())
         self.settings.setValue('enable_notifications', self.enable_notifications_check.isChecked())
+        self.settings.setValue('enable_image_sync', self.enable_image_sync_check.isChecked())
         self.settings.setValue('check_interval', self.check_interval_spin.value())
-        
+
         self.log_message("设置已保存")
-        QMessageBox.information(self, "设置", "设置已保存成功！")
+        if show_message:
+            QMessageBox.information(self, "设置", "设置已保存成功！")
         
     def get_api_base_url(self) -> str:
         """获取API基础URL"""
@@ -943,12 +1033,29 @@ class ClipboardSyncApp(QMainWindow):
                     content = data.get('content', '')
                     content_type = data.get('contentType', 'text')
 
-                if content and content != self.last_clipboard_content:
-                    if content_type == 'text':
-                        pyperclip.copy(content)
-                        self.last_clipboard_content = content
-                        self.log_message(f"收到同步内容: {content[:50]}{'...' if len(content) > 50 else ''}")
-                        self.show_notification("剪切板同步", f"收到新内容: {content[:30]}{'...' if len(content) > 30 else ''}")
+                if content:
+                    if content_type == 'text' and content != self.last_clipboard_content:
+                        # 设置标记，避免触发剪切板检查循环
+                        self.is_setting_clipboard = True
+                        try:
+                            pyperclip.copy(content)
+                            self.last_clipboard_content = content
+                            self.log_message(f"收到同步内容: {content[:50]}{'...' if len(content) > 50 else ''}")
+                            self.show_notification("剪切板同步", f"收到新内容: {content[:30]}{'...' if len(content) > 30 else ''}")
+                        finally:
+                            # 延迟重置标记
+                            QTimer.singleShot(500, lambda: setattr(self, 'is_setting_clipboard', False))
+                    elif content_type == 'image':
+                        # 安全检查：确保应用程序状态正常
+                        if hasattr(self, 'handle_received_image') and callable(getattr(self, 'handle_received_image')):
+                            try:
+                                self.handle_received_image(content, sync_data if 'data' in data else data)
+                            except Exception as img_error:
+                                self.log_message(f"处理图片消息时发生严重错误: {str(img_error)}")
+                                import traceback
+                                self.log_message(f"图片处理错误堆栈: {traceback.format_exc()}")
+                        else:
+                            self.log_message("图片处理方法不可用")
                     else:
                         self.log_message(f"收到非文本内容，类型: {content_type}")
 
@@ -1081,15 +1188,472 @@ class ClipboardSyncApp(QMainWindow):
     def check_clipboard(self):
         """检查剪切板变化"""
         try:
-            current_content = pyperclip.paste()
+            # 如果正在设置剪切板，跳过检查避免循环
+            if getattr(self, 'is_setting_clipboard', False):
+                return
 
-            # 检查内容是否发生变化
+            # 获取系统剪切板
+            clipboard = QApplication.clipboard()
+
+            # 检查是否有图片（如果启用了图片同步）
+            if self.enable_image_sync and clipboard.mimeData().hasImage():
+                try:
+                    # 检查是否在图片处理时间窗口内（10秒内不重复检测）
+                    import time
+                    current_time = time.time()
+                    if current_time - self.image_processing_time < 10:
+                        self.log_message(f"在图片处理时间窗口内，跳过检测 ({current_time - self.image_processing_time:.1f}秒)")
+                        return
+
+                    pixmap = clipboard.pixmap()
+                    if not pixmap.isNull():
+                        # 将图片转换为字节数据
+                        image_data = self.pixmap_to_bytes(pixmap)
+                        if image_data:
+                            # 计算图片的哈希值进行比较
+                            import hashlib
+                            current_hash = hashlib.md5(image_data).hexdigest()
+                            last_hash = getattr(self, 'last_clipboard_image_hash', None)
+
+                            # 只有哈希值不同才发送（简化逻辑）
+                            if current_hash != last_hash:
+                                self.last_clipboard_image = image_data
+                                self.last_clipboard_image_hash = current_hash
+                                self.log_message(f"检测到新图片，哈希: {current_hash[:8]}...")
+                                self.send_clipboard_image(image_data)
+                                return
+                            else:
+                                # 图片相同，跳过
+                                return
+                except Exception as img_check_error:
+                    self.log_message(f"检查图片时发生错误: {str(img_check_error)}")
+                    # 继续处理文本，不要因为图片错误而中断
+
+            # 检查文本内容
+            current_content = pyperclip.paste()
             if current_content != self.last_clipboard_content and current_content.strip():
                 self.last_clipboard_content = current_content
                 self.send_clipboard_content(current_content)
 
         except Exception as e:
             self.log_message(f"检查剪切板失败: {str(e)}")
+
+    def pixmap_to_bytes(self, pixmap: QPixmap) -> bytes:
+        """将QPixmap转换为字节数据"""
+        try:
+            # 将QPixmap转换为QImage
+            image = pixmap.toImage()
+
+            # 创建字节缓冲区
+            byte_array = io.BytesIO()
+
+            # 将QImage转换为PIL Image
+            width = image.width()
+            height = image.height()
+            ptr = image.bits()
+            ptr.setsize(image.byteCount())
+
+            # 转换为PIL Image
+            pil_image = Image.frombuffer("RGBA", (width, height), ptr, "raw", "BGRA", 0, 1)
+
+            # 转换为RGB模式（去除透明度）
+            if pil_image.mode == 'RGBA':
+                # 创建白色背景
+                background = Image.new('RGB', pil_image.size, (255, 255, 255))
+                background.paste(pil_image, mask=pil_image.split()[-1])  # 使用alpha通道作为mask
+                pil_image = background
+
+            # 保存为PNG格式
+            pil_image.save(byte_array, format='PNG')
+            return byte_array.getvalue()
+
+        except Exception as e:
+            self.log_message(f"图片转换失败: {str(e)}")
+            return None
+
+    def send_clipboard_image(self, image_data: bytes):
+        """发送剪切板图片到服务器"""
+        try:
+            # 更新图片处理时间戳
+            import time
+            self.image_processing_time = time.time()
+
+            if not self.clipboard_client:
+                self.log_message("剪切板客户端未初始化")
+                return
+
+            # 检查图片大小（限制为5MB）
+            if len(image_data) > 5 * 1024 * 1024:
+                self.log_message(f"图片过大({len(image_data)/1024/1024:.1f}MB)，跳过同步")
+                return
+
+            # 验证图片数据
+            try:
+                pil_image = Image.open(io.BytesIO(image_data))
+                pil_image.verify()
+                self.log_message(f"发送图片验证成功: {pil_image.format} {pil_image.size}")
+            except Exception as e:
+                self.log_message(f"发送图片验证失败: {str(e)}")
+                return
+
+            # 生成设备ID和文件名
+            device_id = f"windows-client-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            file_name = f"clipboard_image_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+
+            # 发送图片内容
+            result = self.clipboard_client.create_image_item(
+                image_data=image_data,
+                device_id=device_id,
+                file_name=file_name,
+                mime_type="image/png"
+            )
+
+            if result.get('success'):
+                # 更新哈希值，避免重复发送
+                import hashlib
+                sent_hash = hashlib.md5(image_data).hexdigest()
+                self.last_clipboard_image_hash = sent_hash
+
+                self.log_message(f"剪切板图片已同步: {file_name} ({len(image_data)/1024:.1f}KB) 哈希: {sent_hash[:8]}...")
+                self.last_sync_label.setText(f"最后同步时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                self.show_notification("剪切板同步", f"图片已同步: {file_name}")
+
+                # 更新统计信息
+                self.update_clipboard_stats_via_api()
+            else:
+                error_msg = result.get('message', '未知错误')
+                self.log_message(f"图片同步失败: {error_msg}")
+
+        except Exception as e:
+            self.log_message(f"发送图片失败: {str(e)}")
+            import traceback
+            self.log_message(f"发送图片详细错误: {traceback.format_exc()}")
+
+    def handle_received_image(self, content: str, data: dict):
+        """处理接收到的图片内容"""
+        # 检查图片同步是否启用
+        if not getattr(self, 'enable_image_sync', True):
+            self.log_message("图片同步已禁用，跳过处理")
+            return
+
+        try:
+            # 更新图片处理时间戳
+            import time
+            self.image_processing_time = time.time()
+
+            self.log_message("开始处理接收到的图片...")
+
+            # 获取图片ID，通过API下载完整图片数据
+            item_id = data.get('id')
+            if not item_id:
+                self.log_message("图片消息缺少ID信息")
+                return
+
+            self.log_message(f"图片ID: {item_id}")
+
+            # 检查必要的组件是否存在
+            if not hasattr(self, 'clipboard_client') or not self.clipboard_client:
+                self.log_message("剪切板客户端未初始化，无法下载图片")
+                return
+
+            # 暂时禁用图片同步，避免在处理过程中触发循环
+            original_enable_state = self.enable_image_sync
+            self.enable_image_sync = False
+
+            try:
+                # 通过文件API下载图片
+                try:
+                    from files_api import FilesAPI
+                    base_url = self.get_api_base_url()
+                    security_headers = self.get_security_headers()
+
+                    self.log_message(f"使用API地址: {base_url}")
+
+                    files_api = FilesAPI(base_url=base_url)
+                    if security_headers:
+                        files_api.session.headers.update(security_headers)
+
+                    # 下载图片文件
+                    self.log_message("开始下载图片文件...")
+                    result = files_api.download_file(item_id)
+
+                    if not result.get('success'):
+                        self.log_message(f"下载图片失败: {result.get('message', '未知错误')}")
+                        return
+
+                    image_bytes = result.get('content')
+                    if not image_bytes:
+                        self.log_message("下载的图片数据为空")
+                        return
+
+                    self.log_message(f"成功下载图片，大小: {len(image_bytes)} 字节")
+
+                except Exception as download_error:
+                    self.log_message(f"下载图片时发生错误: {str(download_error)}")
+                    return
+
+                # 使用更安全的方式处理图片
+                self.log_message("开始安全处理图片...")
+                success = self.ultra_safe_set_image_to_clipboard(image_bytes, data)
+
+                if success:
+                    file_name = data.get('fileName', '图片')
+                    self.log_message(f"图片处理成功: {file_name}")
+                    self.show_notification("剪切板同步", f"收到新图片: {file_name}")
+                else:
+                    self.log_message("图片处理失败")
+
+            finally:
+                # 延迟恢复图片同步状态
+                QTimer.singleShot(2000, lambda: setattr(self, 'enable_image_sync', original_enable_state))
+
+        except Exception as e:
+            self.log_message(f"处理接收图片失败: {str(e)}")
+            import traceback
+            self.log_message(f"总体错误详情: {traceback.format_exc()}")
+
+    def safe_set_image_to_clipboard(self, image_bytes: bytes, data: dict) -> bool:
+        """安全地将图片设置到剪切板"""
+        try:
+            # 导入必要的模块
+            from PyQt5.QtGui import QImage
+
+            # 验证图片数据
+            pil_image = Image.open(io.BytesIO(image_bytes))
+            self.log_message(f"图片验证成功: {pil_image.format} {pil_image.size} {pil_image.mode}")
+
+            # 限制图片大小，避免内存问题
+            max_size = (2048, 2048)
+            if pil_image.size[0] > max_size[0] or pil_image.size[1] > max_size[1]:
+                self.log_message(f"图片过大，进行缩放: {pil_image.size} -> {max_size}")
+                pil_image.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+            # 转换为RGB模式
+            if pil_image.mode not in ('RGB', 'RGBA'):
+                self.log_message(f"转换图片模式: {pil_image.mode} -> RGB")
+                pil_image = pil_image.convert('RGB')
+
+            # 使用更简单的方式创建QPixmap
+            width, height = pil_image.size
+
+            # 转换为字节数组
+            if pil_image.mode == 'RGBA':
+                image_data = pil_image.tobytes('raw', 'RGBA')
+                format_type = QImage.Format_RGBA8888
+            else:
+                image_data = pil_image.tobytes('raw', 'RGB')
+                format_type = QImage.Format_RGB888
+
+            # 创建QImage
+            qimage = QImage(image_data, width, height, format_type)
+
+            if qimage.isNull():
+                self.log_message("QImage创建失败")
+                return False
+
+            # 转换为QPixmap
+            pixmap = QPixmap.fromImage(qimage)
+
+            if pixmap.isNull():
+                self.log_message("QPixmap转换失败")
+                return False
+
+            # 使用更安全的方式设置到剪切板
+            try:
+                clipboard = QApplication.clipboard()
+
+                # 先清空剪切板
+                clipboard.clear()
+
+                # 使用事件循环确保操作完成
+                QApplication.processEvents()
+
+                # 设置图片
+                clipboard.setPixmap(pixmap)
+
+                # 再次处理事件
+                QApplication.processEvents()
+
+                self.log_message("图片已写入系统剪切板")
+
+            except Exception as clipboard_error:
+                self.log_message(f"写入剪切板时发生错误: {str(clipboard_error)}")
+                return False
+
+            # 更新哈希值
+            import hashlib
+            self.last_clipboard_image = image_bytes
+            self.last_clipboard_image_hash = hashlib.md5(image_bytes).hexdigest()
+
+            self.log_message(f"图片已成功写入剪切板: {width}x{height}")
+            return True
+
+        except Exception as e:
+            self.log_message(f"安全设置图片到剪切板失败: {str(e)}")
+            import traceback
+            self.log_message(f"安全设置错误详情: {traceback.format_exc()}")
+            return False
+
+    def ultra_safe_set_image_to_clipboard(self, image_bytes: bytes, data: dict) -> bool:
+        """超级安全地将图片设置到剪切板 - 使用临时文件方式"""
+        import tempfile
+        import os
+
+        temp_file = None
+        try:
+            self.log_message("使用超级安全模式处理图片...")
+
+            # 验证图片数据
+            pil_image = Image.open(io.BytesIO(image_bytes))
+            self.log_message(f"图片验证成功: {pil_image.format} {pil_image.size} {pil_image.mode}")
+
+            # 限制图片大小
+            max_size = (1024, 1024)  # 更保守的大小限制
+            if pil_image.size[0] > max_size[0] or pil_image.size[1] > max_size[1]:
+                self.log_message(f"图片过大，进行缩放: {pil_image.size} -> {max_size}")
+                pil_image.thumbnail(max_size, Image.Resampling.LANCZOS)
+
+            # 转换为RGB模式
+            if pil_image.mode != 'RGB':
+                self.log_message(f"转换图片模式: {pil_image.mode} -> RGB")
+                pil_image = pil_image.convert('RGB')
+
+            # 保存到临时文件
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                pil_image.save(temp_file.name, 'PNG')
+                temp_file_path = temp_file.name
+                self.log_message(f"图片已保存到临时文件: {temp_file_path}")
+
+            # 从临时文件加载到QPixmap
+            pixmap = QPixmap(temp_file_path)
+
+            if pixmap.isNull():
+                self.log_message("从临时文件加载QPixmap失败")
+                return False
+
+            self.log_message(f"QPixmap加载成功: {pixmap.width()}x{pixmap.height()}")
+
+            # 设置到剪切板
+            try:
+                clipboard = QApplication.clipboard()
+                clipboard.clear()
+                QApplication.processEvents()
+
+                clipboard.setPixmap(pixmap)
+                QApplication.processEvents()
+
+                self.log_message("图片已写入系统剪切板")
+
+                # 更新哈希值 - 需要记录处理后的图片哈希
+                import hashlib
+
+                # 计算处理后图片的哈希（从剪切板读取）
+                try:
+                    clipboard_pixmap = QApplication.clipboard().pixmap()
+                    if not clipboard_pixmap.isNull():
+                        processed_image_data = self.pixmap_to_bytes(clipboard_pixmap)
+                        if processed_image_data:
+                            processed_hash = hashlib.md5(processed_image_data).hexdigest()
+                            self.last_clipboard_image = processed_image_data
+                            self.last_clipboard_image_hash = processed_hash
+                            self.log_message(f"记录处理后图片哈希: {processed_hash[:8]}...")
+                        else:
+                            # 如果无法获取处理后的数据，使用原始数据
+                            original_hash = hashlib.md5(image_bytes).hexdigest()
+                            self.last_clipboard_image = image_bytes
+                            self.last_clipboard_image_hash = original_hash
+                            self.log_message(f"记录原始图片哈希: {original_hash[:8]}...")
+                    else:
+                        # 如果剪切板为空，使用原始数据
+                        original_hash = hashlib.md5(image_bytes).hexdigest()
+                        self.last_clipboard_image = image_bytes
+                        self.last_clipboard_image_hash = original_hash
+                        self.log_message(f"记录原始图片哈希: {original_hash[:8]}...")
+                except Exception as hash_error:
+                    self.log_message(f"计算处理后哈希失败: {str(hash_error)}")
+                    # 使用原始数据作为备选
+                    original_hash = hashlib.md5(image_bytes).hexdigest()
+                    self.last_clipboard_image = image_bytes
+                    self.last_clipboard_image_hash = original_hash
+                    self.log_message(f"使用原始图片哈希: {original_hash[:8]}...")
+
+                return True
+
+            except Exception as clipboard_error:
+                self.log_message(f"写入剪切板失败: {str(clipboard_error)}")
+                return False
+
+        except Exception as e:
+            self.log_message(f"超级安全设置图片失败: {str(e)}")
+            import traceback
+            self.log_message(f"超级安全错误详情: {traceback.format_exc()}")
+            return False
+        finally:
+            # 清理临时文件
+            if temp_file and hasattr(temp_file, 'name') and os.path.exists(temp_file.name):
+                try:
+                    os.unlink(temp_file.name)
+                    self.log_message("临时文件已清理")
+                except:
+                    pass
+
+    def toggle_image_sync(self, enabled: bool):
+        """切换图片同步功能"""
+        self.enable_image_sync = enabled
+        status = "启用" if enabled else "禁用"
+        self.log_message(f"图片同步已{status}")
+
+        if enabled:
+            self.log_message("警告: 图片同步是实验性功能，可能导致程序不稳定")
+
+        # 静默保存设置，不显示消息
+        self.save_settings(show_message=False)
+
+    def pil_image_to_pixmap(self, pil_image: Image.Image) -> QPixmap:
+        """将PIL Image转换为QPixmap"""
+        try:
+            # 导入必要的模块
+            from PyQt5.QtGui import QImage
+
+            self.log_message(f"开始转换PIL图片: {pil_image.mode} {pil_image.size}")
+
+            # 确保图片是RGB模式
+            if pil_image.mode != 'RGB':
+                self.log_message(f"转换图片模式从 {pil_image.mode} 到 RGB")
+                pil_image = pil_image.convert('RGB')
+
+            # 获取图片数据
+            width, height = pil_image.size
+            self.log_message(f"图片尺寸: {width}x{height}")
+
+            # 获取图片字节数据
+            image_data = pil_image.tobytes('raw', 'RGB')
+            self.log_message(f"图片数据大小: {len(image_data)} 字节")
+
+            # 创建QImage
+            qimage = QImage(image_data, width, height, QImage.Format_RGB888)
+
+            if qimage.isNull():
+                self.log_message("创建QImage失败")
+                return QPixmap()
+
+            self.log_message("QImage创建成功")
+
+            # 转换为QPixmap
+            pixmap = QPixmap.fromImage(qimage)
+
+            if pixmap.isNull():
+                self.log_message("QPixmap转换失败")
+                return QPixmap()
+
+            self.log_message(f"QPixmap转换成功: {pixmap.width()}x{pixmap.height()}")
+            return pixmap
+
+        except Exception as e:
+            self.log_message(f"PIL转QPixmap失败: {str(e)}")
+            import traceback
+            self.log_message(f"转换错误详情: {traceback.format_exc()}")
+            return QPixmap()
 
     def send_clipboard_content(self, content: str):
         """发送剪切板内容到服务器"""
