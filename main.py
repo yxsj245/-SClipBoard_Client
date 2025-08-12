@@ -24,13 +24,47 @@ from PyQt5.QtGui import QIcon, QPixmap, QFont, QClipboard
 from PIL import Image
 
 # 添加fun目录到路径
-sys.path.append(os.path.join(os.path.dirname(__file__), 'fun'))
+def add_fun_to_path():
+    """添加fun目录到Python路径"""
+    # 获取当前脚本的目录
+    if getattr(sys, 'frozen', False):
+        # 如果是打包后的可执行文件
+        current_dir = os.path.dirname(sys.executable)
+    else:
+        # 如果是普通Python脚本
+        current_dir = os.path.dirname(os.path.abspath(__file__))
 
-from clipboard_api import ClipboardAPI
-from websocket_api import WebSocketAPI
-from network_config import get_network_config, update_timeouts, get_timeout
-from clipboard_client import ClipboardSyncClient
-from devices_api import DevicesAPI
+    fun_dir = os.path.join(current_dir, 'fun')
+    if os.path.exists(fun_dir) and fun_dir not in sys.path:
+        sys.path.insert(0, fun_dir)
+
+    # 也尝试添加当前目录，以防fun目录在同级
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+
+# 调用函数添加路径
+add_fun_to_path()
+
+try:
+    from clipboard_api import ClipboardAPI
+    from websocket_api import WebSocketAPI
+    from network_config import get_network_config, update_timeouts, get_timeout
+    from clipboard_client import ClipboardSyncClient
+    from devices_api import DevicesAPI
+except ImportError as e:
+    print(f"导入模块失败: {e}")
+    print("请确保fun目录中的所有模块文件都存在")
+    # 尝试从fun子包导入
+    try:
+        from fun.clipboard_api import ClipboardAPI
+        from fun.websocket_api import WebSocketAPI
+        from fun.network_config import get_network_config, update_timeouts, get_timeout
+        from fun.clipboard_client import ClipboardSyncClient
+        from fun.devices_api import DevicesAPI
+        print("使用fun子包导入成功")
+    except ImportError as e2:
+        print(f"从fun子包导入也失败: {e2}")
+        sys.exit(1)
 
 
 class DeviceListDialog(QDialog):
