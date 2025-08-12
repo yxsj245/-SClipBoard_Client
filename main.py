@@ -95,6 +95,131 @@ class DeviceListDialog(QDialog):
             self.device_list.addItem(item)
 
 
+class ClipboardContentDialog(QDialog):
+    """剪切板内容列表对话框"""
+
+    def __init__(self, clipboard_data, parent=None):
+        super().__init__(parent)
+        self.clipboard_data = clipboard_data
+        self.init_ui()
+
+    def init_ui(self):
+        """初始化UI"""
+        self.setWindowTitle("云端剪切板内容")
+        self.setGeometry(200, 200, 700, 500)
+
+        layout = QVBoxLayout(self)
+
+        # 标题和统计信息
+        title_label = QLabel(f"云端剪切板内容 (共 {len(self.clipboard_data)} 项):")
+        title_label.setFont(QFont("", 12, QFont.Bold))
+        layout.addWidget(title_label)
+
+        # 内容列表
+        self.content_list = QListWidget()
+        self.content_list.itemDoubleClicked.connect(self.copy_selected_content)
+        layout.addWidget(self.content_list)
+
+        # 按钮布局
+        button_layout = QHBoxLayout()
+
+        # 复制按钮
+        copy_btn = QPushButton("复制选中内容")
+        copy_btn.clicked.connect(self.copy_selected_content)
+        button_layout.addWidget(copy_btn)
+
+        # 刷新按钮
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.clicked.connect(self.refresh_content)
+        button_layout.addWidget(refresh_btn)
+
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        button_layout.addWidget(close_btn)
+
+        layout.addLayout(button_layout)
+
+        # 填充剪切板数据
+        self.populate_content_list()
+
+    def populate_content_list(self):
+        """填充剪切板内容列表"""
+        self.content_list.clear()
+
+        if not self.clipboard_data:
+            item = QListWidgetItem("暂无剪切板内容")
+            self.content_list.addItem(item)
+            return
+
+        for i, content_item in enumerate(self.clipboard_data):
+            if isinstance(content_item, dict):
+                content_type = content_item.get('type', 'unknown')
+                content = content_item.get('content', '')
+                device_id = content_item.get('deviceId', '未知设备')
+                created_at = content_item.get('createdAt', content_item.get('timestamp', ''))
+
+                # 格式化显示文本
+                if content_type == 'text':
+                    # 限制显示长度
+                    display_content = content[:100] + ('...' if len(content) > 100 else '')
+                    item_text = f"[文本] {display_content}"
+                elif content_type == 'image':
+                    item_text = f"[图片] {content_item.get('fileName', '图片文件')}"
+                elif content_type == 'file':
+                    item_text = f"[文件] {content_item.get('fileName', '文件')}"
+                else:
+                    item_text = f"[{content_type}] {str(content)[:50]}..."
+
+                item = QListWidgetItem(item_text)
+
+                # 设置工具提示
+                tooltip_text = f"类型: {content_type}\n设备: {device_id}\n时间: {created_at}\n"
+                if content_type == 'text' and content:
+                    tooltip_text += f"内容: {content[:200]}{'...' if len(content) > 200 else ''}"
+                elif content_type in ['image', 'file']:
+                    tooltip_text += f"文件名: {content_item.get('fileName', '未知')}"
+
+                item.setToolTip(tooltip_text)
+
+                # 存储完整数据到item
+                item.setData(Qt.UserRole, content_item)
+
+                self.content_list.addItem(item)
+
+    def copy_selected_content(self):
+        """复制选中的内容到剪切板"""
+        current_item = self.content_list.currentItem()
+        if not current_item:
+            QMessageBox.information(self, "提示", "请先选择要复制的内容")
+            return
+
+        content_data = current_item.data(Qt.UserRole)
+        if not content_data:
+            QMessageBox.warning(self, "错误", "无法获取内容数据")
+            return
+
+        content_type = content_data.get('type', '')
+        content = content_data.get('content', '')
+
+        if content_type == 'text' and content:
+            try:
+                import pyperclip
+                pyperclip.copy(content)
+                QMessageBox.information(self, "成功", f"已复制文本内容到剪切板\n内容: {content[:50]}{'...' if len(content) > 50 else ''}")
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"复制失败: {str(e)}")
+        else:
+            QMessageBox.information(self, "提示", f"暂不支持复制 {content_type} 类型的内容")
+
+    def refresh_content(self):
+        """刷新内容列表"""
+        # 通知父窗口刷新数据
+        if self.parent():
+            self.parent().request_clipboard_content_refresh()
+        QMessageBox.information(self, "提示", "已请求刷新，请稍候...")
+
+
 class WebSocketThread(QThread):
     """WebSocket连接线程"""
 
@@ -109,6 +234,7 @@ class WebSocketThread(QThread):
         self.security_headers = security_headers or {}
         self.websocket = None
         self.is_running = False
+        self.message_queue = []  # 消息队列
 
     def run(self):
         """运行WebSocket连接"""
@@ -152,6 +278,14 @@ class WebSocketThread(QThread):
 
             self.connection_status_changed.emit(True)
 
+            # 连接成功后立即请求获取所有内容
+            await self.send_message({
+                "type": "get_all_content",
+                "data": {
+                    "limit": 1000
+                }
+            })
+
             # 监听消息
             await self.listen_messages()
 
@@ -163,10 +297,19 @@ class WebSocketThread(QThread):
         try:
             while self.is_running and self.websocket:
                 try:
-                    # 直接从websocket接收消息
-                    message = await self.websocket.recv()
-                    data = json.loads(message)
-                    self.message_received.emit(data)
+                    # 处理消息队列中的待发送消息
+                    while self.message_queue:
+                        queued_message = self.message_queue.pop(0)
+                        await self.send_message(queued_message)
+
+                    # 设置超时接收消息，避免阻塞队列处理
+                    try:
+                        message = await asyncio.wait_for(self.websocket.recv(), timeout=0.1)
+                        data = json.loads(message)
+                        self.message_received.emit(data)
+                    except asyncio.TimeoutError:
+                        # 超时是正常的，继续循环
+                        continue
 
                 except Exception as e:
                     if self.is_running:
@@ -177,6 +320,23 @@ class WebSocketThread(QThread):
             self.error_occurred.emit(f"监听消息失败: {str(e)}")
         finally:
             self.connection_status_changed.emit(False)
+
+    async def send_message(self, message: Dict[str, Any]):
+        """发送消息到WebSocket服务器"""
+        if not self.websocket:
+            return False
+
+        try:
+            message_str = json.dumps(message, ensure_ascii=False)
+            await self.websocket.send(message_str)
+            return True
+        except Exception as e:
+            self.error_occurred.emit(f"发送消息失败: {str(e)}")
+            return False
+
+    def queue_message(self, message: Dict[str, Any]):
+        """将消息加入队列（线程安全）"""
+        self.message_queue.append(message)
 
     def stop(self):
         """停止WebSocket连接"""
@@ -219,6 +379,7 @@ class ClipboardSyncApp(QMainWindow):
         self.stats_timer = QTimer()
         self.stats_timer.timeout.connect(self.update_connection_stats)
         self.current_device_data = []  # 存储当前设备数据
+        self.current_clipboard_data = []  # 存储当前剪切板数据
         QTimer.singleShot(2000, self.start_stats_timer)  # 2秒后启动统计定时器
         
     def init_ui(self):
@@ -291,14 +452,20 @@ class ClipboardSyncApp(QMainWindow):
         layout.addWidget(connection_group)
         
         # 统计信息组
-        stats_group = QGroupBox("统计信息")
+        stats_group = QGroupBox("云端剪切板统计")
         stats_layout = QVBoxLayout(stats_group)
 
         self.items_count_label = QLabel("剪切板项目数: 0")
         self.last_sync_label = QLabel("最后同步时间: 无")
 
+        # 剪切板内容列表按钮
+        self.clipboard_content_btn = QPushButton("查看云端内容")
+        self.clipboard_content_btn.clicked.connect(self.show_clipboard_content)
+        self.clipboard_content_btn.setEnabled(False)  # 初始状态禁用
+
         stats_layout.addWidget(self.items_count_label)
         stats_layout.addWidget(self.last_sync_label)
+        stats_layout.addWidget(self.clipboard_content_btn)
 
         layout.addWidget(stats_group)
 
@@ -819,6 +986,51 @@ class ClipboardSyncApp(QMainWindow):
                 else:
                     self.log_message(f"连接统计: {connected_devices} 个设备在线，总连接数: {total_connections}，活跃连接: {active_connections}")
 
+            elif message_type == 'all_content' or message_type == 'get_all_content':
+                # 收到所有剪切板内容
+                content_data = data.get('data', [])
+                if isinstance(content_data, list):
+                    self.current_clipboard_data = content_data
+                    total_count = len(content_data)
+                    self.items_count_label.setText(f"剪切板项目数: {total_count}")
+
+                    if total_count > 0:
+                        self.clipboard_content_btn.setEnabled(True)
+                        self.clipboard_content_btn.setText(f"查看云端内容 ({total_count})")
+                    else:
+                        self.clipboard_content_btn.setEnabled(False)
+                        self.clipboard_content_btn.setText("查看云端内容")
+
+                    self.log_message(f"收到云端剪切板内容: {total_count} 项")
+                else:
+                    self.log_message(f"收到剪切板内容数据格式异常: {str(data)[:100]}")
+
+            elif message_type == 'all_text':
+                # 收到所有文本内容
+                content_data = data.get('data', [])
+                if isinstance(content_data, list):
+                    # 过滤并更新当前数据
+                    text_items = [item for item in content_data if item.get('type') == 'text']
+                    self.current_clipboard_data = text_items
+                    self.log_message(f"收到云端文本内容: {len(text_items)} 项")
+
+            elif message_type == 'all_images':
+                # 收到所有图片内容
+                content_data = data.get('data', [])
+                if isinstance(content_data, list):
+                    # 过滤并更新当前数据
+                    image_items = [item for item in content_data if item.get('type') == 'image']
+                    self.current_clipboard_data = image_items
+                    self.log_message(f"收到云端图片内容: {len(image_items)} 项")
+
+            elif message_type == 'latest':
+                # 收到最新内容
+                content_data = data.get('data', [])
+                count = data.get('count', 0)
+                if isinstance(content_data, list):
+                    self.current_clipboard_data = content_data
+                    self.log_message(f"收到最新剪切板内容: {len(content_data)} 项 (请求: {count})")
+
             elif message_type == 'server_info':
                 # 服务器信息
                 server_info = data.get('info', {})
@@ -943,6 +1155,32 @@ class ClipboardSyncApp(QMainWindow):
         dialog = DeviceListDialog(self.current_device_data, self)
         dialog.exec_()
 
+    def show_clipboard_content(self):
+        """显示剪切板内容对话框"""
+        dialog = ClipboardContentDialog(self.current_clipboard_data, self)
+        dialog.exec_()
+
+    def request_clipboard_content_refresh(self):
+        """请求刷新剪切板内容"""
+        if self.websocket_thread and self.is_syncing:
+            # 通过WebSocket请求获取所有内容
+            try:
+                # 发送获取所有内容的请求
+                message = {
+                    "type": "get_all_content",
+                    "data": {
+                        "limit": 1000
+                    }
+                }
+                # 将消息加入队列
+                self.websocket_thread.queue_message(message)
+                self.log_message("已请求刷新剪切板内容")
+            except Exception as e:
+                self.log_message(f"请求刷新剪切板内容失败: {str(e)}")
+        else:
+            # 如果WebSocket未连接，尝试通过API获取
+            self.update_clipboard_stats_via_api()
+
     def format_device_name(self, device_id: str) -> str:
         """
         格式化设备名称显示
@@ -1059,6 +1297,77 @@ class ClipboardSyncApp(QMainWindow):
 
             # 记录详细错误到日志
             self.log_message(f"连接统计异常: {error_detail}")
+
+        # 同时更新剪切板统计信息
+        self.update_clipboard_stats_via_api()
+
+    def update_clipboard_stats_via_api(self):
+        """通过API更新剪切板统计信息"""
+        try:
+            if not hasattr(self, 'server_ip_edit'):
+                return
+
+            # 获取服务器配置
+            server_ip = self.server_ip_edit.text() or "localhost"
+            api_port = self.api_port_edit.text() or "3001"
+            base_url = f"http://{server_ip}:{api_port}"
+
+            # 获取安全认证配置
+            security_headers = self.get_security_headers()
+
+            # 创建剪切板API客户端
+            from fun.clipboard_api import ClipboardAPI
+            clipboard_api = ClipboardAPI(base_url)
+            if security_headers:
+                clipboard_api.session.headers.update(security_headers)
+
+            # 获取剪切板内容
+            result = clipboard_api.get_clipboard_items(limit=1000)
+
+            if result.get('success'):
+                data = result.get('data', {})
+
+                if isinstance(data, dict):
+                    # 如果返回的是分页数据
+                    items = data.get('items', [])
+                    total = data.get('total', len(items))
+                    self.current_clipboard_data = items
+                elif isinstance(data, list):
+                    # 如果直接返回列表
+                    items = data
+                    total = len(items)
+                    self.current_clipboard_data = items
+                else:
+                    items = []
+                    total = 0
+                    self.current_clipboard_data = []
+
+                # 更新统计标签
+                self.items_count_label.setText(f"剪切板项目数: {total}")
+
+                # 启用或禁用查看内容按钮
+                if total > 0:
+                    self.clipboard_content_btn.setEnabled(True)
+                    self.clipboard_content_btn.setText(f"查看云端内容 ({total})")
+                else:
+                    self.clipboard_content_btn.setEnabled(False)
+                    self.clipboard_content_btn.setText("查看云端内容")
+
+            else:
+                # 获取失败时的处理
+                error_msg = result.get('message', '未知错误')
+                self.items_count_label.setText(f"剪切板项目数: 获取失败")
+                self.clipboard_content_btn.setEnabled(False)
+                self.clipboard_content_btn.setText("查看云端内容")
+                self.current_clipboard_data = []
+                self.log_message(f"获取剪切板统计失败: {error_msg}")
+
+        except Exception as e:
+            self.log_message(f"更新剪切板统计失败: {str(e)}")
+            self.items_count_label.setText(f"剪切板项目数: 获取失败")
+            self.clipboard_content_btn.setEnabled(False)
+            self.clipboard_content_btn.setText("查看云端内容")
+            self.current_clipboard_data = []
 
 
 def main():
