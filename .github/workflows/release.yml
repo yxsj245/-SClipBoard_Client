@@ -18,6 +18,13 @@ on:
         default: true
         type: boolean
 
+# 添加必要的权限
+permissions:
+  contents: write    # 允许创建发布版本和上传文件
+  actions: read      # 允许读取Actions状态
+  checks: read       # 允许读取检查状态
+  pull-requests: read # 允许读取PR信息
+  issues: read       # 允许读取Issue信息
 
 env:
   CACHE_VERSION: v1  # 增加此版本号来强制刷新所有缓存
@@ -178,7 +185,7 @@ jobs:
           tar -czf ../shared-clipboard-client-macos.tar.gz *
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             shared-clipboard-client-windows.zip
@@ -211,8 +218,6 @@ jobs:
             **构建信息**:
             - 工作流运行: #${{ github.run_number }}
             - 提交哈希: ${{ github.sha }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # 手动构建总结（仅在手动触发时显示）
   manual_build_summary:
