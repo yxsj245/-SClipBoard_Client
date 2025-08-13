@@ -1,5 +1,7 @@
 # 共享剪切板同步工具
 
+<img width="802" height="639" alt="image" src="https://github.com/user-attachments/assets/3f7a8e8a-cfa0-4d19-a8c4-9e737d2e8f42" />
+
 基于PyQt5的Windows剪切板同步客户端，支持单向和双向剪切板内容同步。
 
 # 请先部署服务端
