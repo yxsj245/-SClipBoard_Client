@@ -51,6 +51,7 @@ try:
     from network_config import get_network_config, update_timeouts, get_timeout
     from clipboard_client import ClipboardSyncClient
     from devices_api import DevicesAPI
+    from auto_start import AutoStartManager
 except ImportError as e:
     print(f"导入模块失败: {e}")
     print("请确保fun目录中的所有模块文件都存在")
@@ -61,6 +62,7 @@ except ImportError as e:
         from fun.network_config import get_network_config, update_timeouts, get_timeout
         from fun.clipboard_client import ClipboardSyncClient
         from fun.devices_api import DevicesAPI
+        from fun.auto_start import AutoStartManager
         print("使用fun子包导入成功")
     except ImportError as e2:
         print(f"从fun子包导入也失败: {e2}")
@@ -722,6 +724,9 @@ class ClipboardSyncApp(QMainWindow):
         self.is_monitoring = False
         self.is_syncing = False
 
+        # 开机自启动管理器
+        self.auto_start_manager = AutoStartManager()
+
         # 连接状态管理
         self.connection_status = "未连接"  # 连接状态: "未连接", "正常", "已连接"
         self.health_check_timer = QTimer()
@@ -1032,6 +1037,7 @@ class ClipboardSyncApp(QMainWindow):
         other_layout = QVBoxLayout(other_group)
         
         self.auto_start_check = QCheckBox("开机自启动")
+        self.auto_start_check.toggled.connect(self.toggle_auto_start)
         self.minimize_to_tray_check = QCheckBox("启动时最小化到托盘")
         self.enable_notifications_check = QCheckBox("启用通知")
         self.enable_notifications_check.setChecked(True)
@@ -1096,6 +1102,7 @@ class ClipboardSyncApp(QMainWindow):
         """初始化系统托盘"""
         if not QSystemTrayIcon.isSystemTrayAvailable():
             QMessageBox.critical(self, "系统托盘", "系统不支持托盘功能")
+            self.tray_icon = None  # 确保属性存在
             return
 
         # 创建托盘图标
@@ -1228,8 +1235,35 @@ class ClipboardSyncApp(QMainWindow):
 
     def show_notification(self, title: str, message: str, icon=QSystemTrayIcon.Information):
         """显示系统通知"""
-        if self.enable_notifications_check.isChecked() and self.tray_icon.isVisible():
-            self.tray_icon.showMessage(title, message, icon, 3000)
+        try:
+            # 检查通知是否启用
+            if not self.enable_notifications_check.isChecked():
+                self.log_message(f"通知已禁用，跳过通知: {title} - {message}")
+                return
+
+            # 检查托盘图标是否存在
+            if not hasattr(self, 'tray_icon') or self.tray_icon is None:
+                self.log_message(f"托盘图标不存在，无法显示通知: {title} - {message}")
+                return
+
+            # 检查托盘图标是否可见
+            if not self.tray_icon.isVisible():
+                self.log_message(f"托盘图标不可见，无法显示通知: {title} - {message}")
+                return
+
+            # 检查系统是否支持托盘通知
+            if not QSystemTrayIcon.isSystemTrayAvailable():
+                self.log_message(f"系统不支持托盘通知: {title} - {message}")
+                return
+
+            # 显示通知
+            self.tray_icon.showMessage(title, message, icon, 5000)  # 延长显示时间到5秒
+            self.log_message(f"已显示通知: {title} - {message}")
+
+        except Exception as e:
+            self.log_message(f"显示通知失败: {str(e)}")
+            import traceback
+            self.log_message(f"通知错误详情: {traceback.format_exc()}")
         
     def clear_log(self):
         """清空日志"""
@@ -1251,7 +1285,15 @@ class ClipboardSyncApp(QMainWindow):
         self.ws_port_edit.setText(self.settings.value('ws_port', '3002'))
         self.auth_key_edit.setText(self.settings.value('auth_key', ''))
         self.auth_value_edit.setText(self.settings.value('auth_value', ''))
+
+        # 先设置开机自启动复选框的初始状态（不触发信号）
+        self.auto_start_check.blockSignals(True)
         self.auto_start_check.setChecked(self.settings.value('auto_start', False, type=bool))
+        self.auto_start_check.blockSignals(False)
+
+        # 然后同步实际的开机自启动状态
+        self.sync_auto_start_status()
+
         self.minimize_to_tray_check.setChecked(self.settings.value('minimize_to_tray', False, type=bool))
         self.enable_notifications_check.setChecked(self.settings.value('enable_notifications', True, type=bool))
 
@@ -1520,7 +1562,8 @@ class ClipboardSyncApp(QMainWindow):
                             pyperclip.copy(content)
                             self.last_clipboard_content = content
                             self.log_message(f"收到同步内容: {content[:50]}{'...' if len(content) > 50 else ''}")
-                            self.show_notification("剪切板同步", f"收到新内容: {content[:30]}{'...' if len(content) > 30 else ''}")
+                            # 显示通知
+                            self.show_notification("剪切板同步", f"收到新文本: {content[:30]}{'...' if len(content) > 30 else ''}")
                         finally:
                             # 延迟重置标记
                             QTimer.singleShot(500, lambda: setattr(self, 'is_setting_clipboard', False))
@@ -1529,6 +1572,8 @@ class ClipboardSyncApp(QMainWindow):
                         if hasattr(self, 'handle_received_image') and callable(getattr(self, 'handle_received_image')):
                             try:
                                 self.handle_received_image(content, sync_data if 'data' in data else data)
+                                # 显示图片同步通知
+                                self.show_notification("剪切板同步", "收到新图片内容")
                             except Exception as img_error:
                                 self.log_message(f"处理图片消息时发生严重错误: {str(img_error)}")
                                 import traceback
@@ -1537,6 +1582,8 @@ class ClipboardSyncApp(QMainWindow):
                             self.log_message("图片处理方法不可用")
                     else:
                         self.log_message(f"收到非文本内容，类型: {content_type}")
+                        # 显示其他类型内容的通知
+                        self.show_notification("剪切板同步", f"收到新内容 (类型: {content_type})")
 
             elif message_type == 'ping' or message_type == 'heartbeat':
                 # 心跳消息
@@ -1546,11 +1593,13 @@ class ClipboardSyncApp(QMainWindow):
                 # 设备连接通知
                 device_id = data.get('deviceId', '未知设备')
                 self.log_message(f"设备已连接: {device_id}")
+                self.show_notification("设备连接", f"设备 {device_id} 已连接")
 
             elif message_type == 'device_disconnected':
                 # 设备断开通知
                 device_id = data.get('deviceId', '未知设备')
                 self.log_message(f"设备已断开: {device_id}")
+                self.show_notification("设备断开", f"设备 {device_id} 已断开", QSystemTrayIcon.Warning)
 
             elif message_type == 'connection_stats':
                 # 连接统计信息
@@ -2383,26 +2432,96 @@ class ClipboardSyncApp(QMainWindow):
         # 剪切板统计信息现在通过 on_stats_updated 方法更新
         pass
 
+    def toggle_auto_start(self, checked: bool):
+        """切换开机自启动状态"""
+        try:
+            if not self.auto_start_manager.is_supported():
+                QMessageBox.warning(self, "不支持", "当前系统不支持开机自启动功能")
+                # 重置复选框状态
+                self.auto_start_check.blockSignals(True)
+                self.auto_start_check.setChecked(False)
+                self.auto_start_check.blockSignals(False)
+                return
+
+            success, error = self.auto_start_manager.toggle(checked)
+
+            if success:
+                if checked:
+                    self.log_message("开机自启动已启用")
+                    self.show_notification("设置成功", "开机自启动已启用")
+                else:
+                    self.log_message("开机自启动已禁用")
+                    self.show_notification("设置成功", "开机自启动已禁用")
+            else:
+                self.log_message(f"开机自启动设置失败: {error}")
+                QMessageBox.warning(self, "设置失败", f"开机自启动设置失败:\n{error}")
+
+                # 重置复选框状态
+                self.auto_start_check.blockSignals(True)
+                self.auto_start_check.setChecked(not checked)
+                self.auto_start_check.blockSignals(False)
+
+        except Exception as e:
+            self.log_message(f"开机自启动设置异常: {str(e)}")
+            QMessageBox.critical(self, "设置异常", f"开机自启动设置时发生异常:\n{str(e)}")
+
+            # 重置复选框状态
+            self.auto_start_check.blockSignals(True)
+            self.auto_start_check.setChecked(not checked)
+            self.auto_start_check.blockSignals(False)
+
+    def sync_auto_start_status(self):
+        """同步开机自启动状态（从注册表读取实际状态）"""
+        try:
+            if self.auto_start_manager.is_supported():
+                enabled, error = self.auto_start_manager.is_enabled()
+                if error:
+                    self.log_message(f"检查开机自启动状态失败: {error}")
+                else:
+                    # 阻止信号触发，直接设置UI状态
+                    self.auto_start_check.blockSignals(True)
+                    self.auto_start_check.setChecked(enabled)
+                    self.auto_start_check.blockSignals(False)
+
+                    self.log_message(f"开机自启动状态同步: {'已启用' if enabled else '未启用'}")
+            else:
+                # 如果不支持，禁用复选框
+                self.auto_start_check.setEnabled(False)
+                self.auto_start_check.setToolTip("当前系统不支持开机自启动功能")
+
+        except Exception as e:
+            self.log_message(f"同步开机自启动状态异常: {str(e)}")
+            self.auto_start_check.setEnabled(False)
+            self.auto_start_check.setToolTip(f"开机自启动功能异常: {str(e)}")
+
 
 def main():
     """主函数"""
     app = QApplication(sys.argv)
-    
+
     # 设置应用程序信息
     app.setApplicationName("共享剪切板同步工具")
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("ClipboardSync")
-    
+
     # 检查是否支持系统托盘
     if not QSystemTrayIcon.isSystemTrayAvailable():
-        QMessageBox.critical(None, "系统托盘", 
+        QMessageBox.critical(None, "系统托盘",
                            "系统不支持托盘功能，程序将无法正常运行。")
         sys.exit(1)
-    
+
     # 创建主窗口
     window = ClipboardSyncApp()
-    window.show()
-    
+
+    # 检查是否启动时最小化到托盘
+    if window.minimize_to_tray_check.isChecked():
+        # 启动时最小化到托盘，不显示主窗口
+        window.log_message("程序启动时最小化到托盘")
+        window.show_notification("剪切板同步工具", "程序已启动并最小化到托盘")
+    else:
+        # 正常显示主窗口
+        window.show()
+
     # 运行应用程序
     sys.exit(app.exec_())
 
